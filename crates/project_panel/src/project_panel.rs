@@ -288,17 +288,26 @@ impl ProjectPanel {
                 }
                 project::Event::DiskBasedDiagnosticsFinished { .. }
                 | project::Event::DiagnosticsUpdated { .. } => {
-<<<<<<< HEAD
                     if ProjectPanelSettings::get_global(cx).show_diagnostics != ShowDiagnostics::Off
                     {
                         this.update_diagnostics(cx);
                         cx.notify();
                     }
-=======
+
+                }
+                project::Event::DiskBasedDiagnosticsFinished { .. }
+                | project::Event::DiagnosticsUpdated { .. } => {
+                    if ProjectPanelSettings::get_global(cx).show_diagnostics != ShowDiagnostics::Off
+                    {
+                        this.update_diagnostics(cx);
+                        cx.notify();
+                    }
+                }
+                project::Event::DiskBasedDiagnosticsFinished { .. }
+                | project::Event::DiagnosticsUpdated { .. } => {
                     this.update_diagnostics(cx);
                     this.update_visible_entries(None, cx);
                     cx.notify();
->>>>>>> 9116e13ef6 (show errors in project panel)
                 }
                 project::Event::WorktreeRemoved(id) => {
                     this.expanded_dir_ids.remove(id);
@@ -379,7 +388,6 @@ impl ProjectPanel {
                 pending_serialization: Task::ready(None),
                 show_scrollbar: !Self::should_autohide_scrollbar(cx),
                 hide_scrollbar_task: None,
-<<<<<<< HEAD
                 vertical_scrollbar_state: ScrollbarState::new(scroll_handle.clone())
                     .parent_view(cx.view()),
                 horizontal_scrollbar_state: ScrollbarState::new(scroll_handle.clone())
@@ -388,10 +396,9 @@ impl ProjectPanel {
                 diagnostics: Default::default(),
                 scroll_handle,
                 mouse_down: false,
-=======
                 scrollbar_drag_thumb_offset: Default::default(),
                 diagnostic_error_colors: Default::default(),
->>>>>>> 9116e13ef6 (show errors in project panel)
+
             };
             this.update_visible_entries(None, cx);
 
@@ -507,7 +514,6 @@ impl ProjectPanel {
     }
 
     fn update_diagnostics(&mut self, cx: &mut ViewContext<Self>) {
-<<<<<<< HEAD
         let mut diagnostics: HashMap<(WorktreeId, PathBuf), DiagnosticSeverity> =
             Default::default();
         let show_diagnostics_setting = ProjectPanelSettings::get_global(cx).show_diagnostics;
@@ -563,31 +569,7 @@ impl ProjectPanel {
                     std::cmp::min(*strongest_diagnostic_severity, diagnostic_severity);
             })
             .or_insert(diagnostic_severity);
-=======
-        self.diagnostic_error_colors = self
-            .project
-            .read(cx)
-            .diagnostic_summaries(false, cx)
-            .filter_map(|(path, _, diagnostic_summary)| {
-                if diagnostic_summary.error_count > 0 {
-                    Some((path, Color::Error))
-                } else {
-                    None
-                }
-            })
-            .flat_map(|(project_path, color)| {
-                let mut path_buf = PathBuf::new();
-                project_path
-                    .path
-                    .components()
-                    .map(|component| {
-                        path_buf.push(component);
-                        (path_buf.clone(), color)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
->>>>>>> 9116e13ef6 (show errors in project panel)
+
     }
 
     fn serialize(&mut self, cx: &mut ViewContext<Self>) {
@@ -2645,8 +2627,7 @@ impl ProjectPanel {
             .map_or(false, |selection| selection.entry_id == entry_id);
 
         let width = self.size(cx);
-<<<<<<< HEAD
-=======
+
         let filename_text_color = if let Some(color) = self
             .diagnostic_error_colors
             .get(&details.path.to_path_buf())
@@ -2655,7 +2636,6 @@ impl ProjectPanel {
         } else {
             entry_git_aware_label_color(details.git_status, details.is_ignored, is_marked)
         };
->>>>>>> 9116e13ef6 (show errors in project panel)
         let file_name = details.filename.clone();
 
         let mut icon = details.icon.clone();
