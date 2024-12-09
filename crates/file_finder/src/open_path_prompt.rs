@@ -50,7 +50,7 @@ impl OpenPathPrompt {
     pub(crate) fn register(workspace: &mut Workspace, _: &Model<Workspace>, _: &mut AppContext) {
         workspace.set_prompt_for_open_path(Box::new(|workspace, lister, cx| {
             let (tx, rx) = futures::channel::oneshot::channel();
-            Self::prompt_for_open_path(workspace, lister, tx, cx);
+            Self::prompt_for_open_path(workspace, lister, tx, model, cx);
             rx
         }));
     }
@@ -65,9 +65,9 @@ impl OpenPathPrompt {
         workspace.toggle_modal(cx, |cx| {
             let delegate = OpenPathDelegate::new(tx, lister.clone());
 
-            let picker = Picker::uniform_list(delegate, cx).width(rems(34.));
+            let picker = Picker::uniform_list(delegate, model, cx).width(rems(34.));
             let query = lister.default_query(cx);
-            picker.set_query(query, cx);
+            picker.set_query(query, model, cx);
             picker
         });
     }
@@ -86,7 +86,7 @@ impl PickerDelegate for OpenPathDelegate {
 
     fn set_selected_index(&mut self, ix: usize, model: &Model<Picker>, cx: &mut AppContext) {
         self.selected_index = ix;
-        cx.notify();
+        model.notify(cx);
     }
 
     fn update_matches(
@@ -159,7 +159,7 @@ impl PickerDelegate for OpenPathDelegate {
                     if directory_state.error.is_some() {
                         this.delegate.matches.clear();
                         this.delegate.selected_index = 0;
-                        cx.notify();
+                        model.notify(cx);
                         return None;
                     }
 
@@ -182,7 +182,7 @@ impl PickerDelegate for OpenPathDelegate {
                         .matches
                         .extend(match_candidates.iter().map(|m| m.id));
 
-                    cx.notify();
+                    model.notify(cx);
                 })
                 .ok();
                 return;
@@ -216,7 +216,7 @@ impl PickerDelegate for OpenPathDelegate {
                         *m,
                     )
                 });
-                cx.notify();
+                model.notify(cx);
             })
             .ok();
         })

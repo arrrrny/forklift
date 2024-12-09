@@ -539,7 +539,7 @@ fn render_markdown_text(parsed_new: &MarkdownParagraph, cx: &mut RenderContext) 
                                     Link::Web { url } => cx.open_url(url),
                                     Link::Path { path, .. } => {
                                         if let Some(workspace) = &workspace {
-                                            _ = workspace.update(cx, |workspace, cx| {
+                                            _ = workspace.update(cx, |workspace, model, cx| {
                                                 workspace
                                                     .open_abs_path(path.clone(), false, cx)
                                                     .detach();
@@ -578,7 +578,7 @@ impl InteractiveMarkdownElementTooltip {
     ) -> View<Self> {
         let tooltip_text = tooltip_text.map(|t| util::truncate_and_trailoff(&t, 50).into());
 
-        cx.new_view(|_| Self {
+        cx.new_model(|_| Self {
             tooltip_text,
             action_text: action_text.to_string(),
         })

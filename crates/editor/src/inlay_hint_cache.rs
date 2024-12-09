@@ -305,6 +305,7 @@ impl InlayHintCache {
                         multi_buffer,
                         &visible_hints,
                         &new_allowed_hint_kinds,
+                        model,
                         cx,
                     );
                     if new_splice.is_some() {
@@ -388,6 +389,7 @@ impl InlayHintCache {
                         excerpts_to_query,
                         invalidate,
                         cache_version,
+                        model,
                         cx,
                     )
                 })
@@ -673,7 +675,7 @@ fn spawn_new_update_tasks(
             }
         };
 
-        let Some(query_ranges) = editor.buffer.update(cx, |multi_buffer, cx| {
+        let Some(query_ranges) = editor.buffer.update(cx, |multi_buffer, model, cx| {
             determine_query_ranges(
                 multi_buffer,
                 excerpt_id,
@@ -838,7 +840,7 @@ fn new_update_task(
                                   cx: &mut AsyncAppContext| {
             log::error!("inlay hint update task for range failed: {e:#?}");
             editor
-                .update(cx, |editor, cx| {
+                .update(cx, |editor, model, cx| {
                     if let Some(task_ranges) = editor
                         .inlay_hint_cache
                         .update_tasks
@@ -900,7 +902,7 @@ fn fetch_and_update_hints(
         let (lsp_request_limiter, multi_buffer_snapshot) =
             editor.update(&mut cx, |editor, cx| {
                 let multi_buffer_snapshot =
-                    editor.buffer().update(cx, |buffer, cx| buffer.snapshot(cx));
+                    editor.buffer().update(cx, |buffer, model, cx| buffer.snapshot(cx));
                 let lsp_request_limiter = Arc::clone(&editor.inlay_hint_cache.lsp_request_limiter);
                 (lsp_request_limiter, multi_buffer_snapshot)
             })?;
@@ -1023,6 +1025,7 @@ fn fetch_and_update_hints(
                         invalidate,
                         buffer_snapshot,
                         multi_buffer_snapshot,
+                        model,
                         cx,
                     );
                 })
@@ -1347,7 +1350,7 @@ pub mod tests {
 
         let mut edits_made = 1;
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["0".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1368,7 +1371,7 @@ pub mod tests {
             .unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(None, cx, |s| s.select_ranges([13..13]));
                 editor.handle_input("some change", cx);
                 edits_made += 1;
@@ -1376,7 +1379,7 @@ pub mod tests {
             .unwrap();
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["0".to_string(), "1".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1403,7 +1406,7 @@ pub mod tests {
         edits_made += 1;
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["0".to_string(), "1".to_string(), "2".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1468,7 +1471,7 @@ pub mod tests {
 
         let mut edits_made = 1;
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["0".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1501,7 +1504,7 @@ pub mod tests {
         cx.executor().run_until_parked();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["0".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1527,7 +1530,7 @@ pub mod tests {
 
         edits_made += 1;
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["1".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1604,7 +1607,7 @@ pub mod tests {
         }
 
         let rs_buffer = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_local_buffer("/a/main.rs", cx)
             })
             .await
@@ -1640,7 +1643,7 @@ pub mod tests {
             .await;
         cx.executor().run_until_parked();
         rs_editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["0".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1658,7 +1661,7 @@ pub mod tests {
 
         cx.executor().run_until_parked();
         let md_buffer = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_local_buffer("/a/other.md", cx)
             })
             .await
@@ -1693,7 +1696,7 @@ pub mod tests {
             .await;
         cx.executor().run_until_parked();
         md_editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["0".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1706,14 +1709,14 @@ pub mod tests {
             .unwrap();
 
         rs_editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(None, cx, |s| s.select_ranges([13..13]));
                 editor.handle_input("some rs change", cx);
             })
             .unwrap();
         cx.executor().run_until_parked();
         rs_editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["1".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1729,7 +1732,7 @@ pub mod tests {
             })
             .unwrap();
         md_editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["0".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1742,14 +1745,14 @@ pub mod tests {
             .unwrap();
 
         md_editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(None, cx, |s| s.select_ranges([13..13]));
                 editor.handle_input("some md change", cx);
             })
             .unwrap();
         cx.executor().run_until_parked();
         md_editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["1".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1761,7 +1764,7 @@ pub mod tests {
             })
             .unwrap();
         rs_editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["1".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -1841,7 +1844,7 @@ pub mod tests {
 
         let mut edits_made = 1;
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert_eq!(
                     lsp_request_count.load(Ordering::Relaxed),
                     1,
@@ -1878,7 +1881,7 @@ pub mod tests {
             .expect("inlay refresh request failed");
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert_eq!(
                     lsp_request_count.load(Ordering::Relaxed),
                     2,
@@ -1954,7 +1957,7 @@ pub mod tests {
                 })
             });
             cx.executor().run_until_parked();
-            editor.update(cx, |editor, cx| {
+            editor.update(cx, |editor, model, cx| {
                 assert_eq!(
                     lsp_request_count.load(Ordering::Relaxed),
                     2,
@@ -2002,7 +2005,7 @@ pub mod tests {
         });
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert_eq!(
                     lsp_request_count.load(Ordering::Relaxed),
                     2,
@@ -2033,7 +2036,7 @@ pub mod tests {
             .await
             .expect("inlay refresh request failed");
         cx.executor().run_until_parked();
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
             assert_eq!(
                 lsp_request_count.load(Ordering::Relaxed),
                 2,
@@ -2063,7 +2066,7 @@ pub mod tests {
         });
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert_eq!(
                     lsp_request_count.load(Ordering::Relaxed),
                     3,
@@ -2101,7 +2104,7 @@ pub mod tests {
             .expect("inlay refresh request failed");
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert_eq!(
                     lsp_request_count.load(Ordering::Relaxed),
                     4,
@@ -2173,7 +2176,7 @@ pub mod tests {
             "initial change #3",
         ] {
             editor
-                .update(cx, |editor, cx| {
+                .update(cx, |editor, model, cx| {
                     editor.change_selections(None, cx, |s| s.select_ranges([13..13]));
                     editor.handle_input(change_after_opening, cx);
                 })
@@ -2183,7 +2186,7 @@ pub mod tests {
 
         cx.executor().run_until_parked();
 
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
             let current_text = editor.text(cx);
             for change in &expected_changes {
                 assert!(
@@ -2230,7 +2233,7 @@ pub mod tests {
         cx.executor().run_until_parked();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let current_text = editor.text(cx);
                 for change in &expected_changes {
                     assert!(
@@ -2299,7 +2302,7 @@ pub mod tests {
         );
 
         let buffer = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_local_buffer("/a/main.rs", cx)
             })
             .await
@@ -2344,7 +2347,7 @@ pub mod tests {
             cx: &mut gpui::TestAppContext,
         ) -> Range<Point> {
             let ranges = editor
-                .update(cx, |editor, cx| {
+                .update(cx, |editor, model, cx| {
                     editor.excerpts_for_inlay_hints_query(None, cx)
                 })
                 .unwrap();
@@ -2355,7 +2358,7 @@ pub mod tests {
             );
             let (_, (excerpt_buffer, _, excerpt_visible_range)) =
                 ranges.into_iter().next().unwrap();
-            excerpt_buffer.update(cx, |buffer, _| {
+            excerpt_buffer.update(cx, |buffer, model, _| {
                 let snapshot = buffer.snapshot();
                 let start = buffer
                     .anchor_before(excerpt_visible_range.start)
@@ -2389,7 +2392,7 @@ pub mod tests {
             lsp::Position::new(initial_visible_range.end.row * 2, 2);
         let mut expected_invisible_query_start = lsp_initial_visible_range.end;
         expected_invisible_query_start.character += 1;
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
             let ranges = lsp_request_ranges.lock().drain(..).collect::<Vec<_>>();
             assert_eq!(ranges.len(), 2,
                 "When scroll is at the edge of a big document, its visible part and the same range further should be queried in order, but got: {ranges:?}");
@@ -2417,13 +2420,13 @@ pub mod tests {
         }).unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.scroll_screen(&ScrollAmount::Page(1.0), cx);
             })
             .unwrap();
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.scroll_screen(&ScrollAmount::Page(1.0), cx);
             })
             .unwrap();
@@ -2433,10 +2436,10 @@ pub mod tests {
         cx.executor().run_until_parked();
         let visible_range_after_scrolls = editor_visible_range(&editor, cx);
         let visible_line_count = editor
-            .update(cx, |editor, _| editor.visible_line_count().unwrap())
+            .update(cx, |editor, model, _| editor.visible_line_count().unwrap())
             .unwrap();
         let selection_in_cached_range = editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let ranges = lsp_request_ranges
                     .lock()
                     .drain(..)
@@ -2494,7 +2497,7 @@ pub mod tests {
             .unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(Some(Autoscroll::center()), cx, |s| {
                     s.select_ranges([selection_in_cached_range..selection_in_cached_range])
                 });
@@ -2504,7 +2507,7 @@ pub mod tests {
             INVISIBLE_RANGES_HINTS_REQUEST_DELAY_MILLIS + 100,
         ));
         cx.executor().run_until_parked();
-        editor.update(cx, |_, _| {
+        editor.update(cx, |_, model, _| {
             let ranges = lsp_request_ranges
                 .lock()
                 .drain(..)
@@ -2515,7 +2518,7 @@ pub mod tests {
         }).unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.handle_input("++++more text++++", cx);
             })
             .unwrap();
@@ -2523,7 +2526,7 @@ pub mod tests {
             INVISIBLE_RANGES_HINTS_REQUEST_DELAY_MILLIS + 100,
         ));
         cx.executor().run_until_parked();
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
             let mut ranges = lsp_request_ranges.lock().drain(..).collect::<Vec<_>>();
             ranges.sort_by_key(|r| r.start);
 
@@ -2595,23 +2598,23 @@ pub mod tests {
             },
         );
 
-        let worktree_id = project.update(cx, |project, cx| {
+        let worktree_id = project.update(cx, |project, model, cx| {
             project.worktrees(cx).next().unwrap().read(cx).id()
         });
 
         let buffer_1 = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_buffer((worktree_id, "main.rs"), cx)
             })
             .await
             .unwrap();
         let buffer_2 = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_buffer((worktree_id, "other.rs"), cx)
             })
             .await
             .unwrap();
-        let multibuffer = cx.new_model(|cx| {
+        let multibuffer = cx.new_model(|model, cx| {
             let mut multibuffer = MultiBuffer::new(Capability::ReadWrite);
             multibuffer.push_excerpts(
                 buffer_1.clone(),
@@ -2750,7 +2753,7 @@ pub mod tests {
             .await;
         cx.executor().run_until_parked();
 
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
                 let expected_hints = vec![
                     "main hint #0".to_string(),
                     "main hint #1".to_string(),
@@ -2769,7 +2772,7 @@ pub mod tests {
             }).unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(Some(Autoscroll::Next), cx, |s| {
                     s.select_ranges([Point::new(4, 0)..Point::new(4, 0)])
                 });
@@ -2782,7 +2785,7 @@ pub mod tests {
             })
             .unwrap();
         cx.executor().run_until_parked();
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
                 let expected_hints = vec![
                     "main hint #0".to_string(),
                     "main hint #1".to_string(),
@@ -2802,7 +2805,7 @@ pub mod tests {
             }).unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(Some(Autoscroll::Next), cx, |s| {
                     s.select_ranges([Point::new(100, 0)..Point::new(100, 0)])
                 });
@@ -2812,7 +2815,7 @@ pub mod tests {
             INVISIBLE_RANGES_HINTS_REQUEST_DELAY_MILLIS + 100,
         ));
         cx.executor().run_until_parked();
-        let last_scroll_update_version = editor.update(cx, |editor, cx| {
+        let last_scroll_update_version = editor.update(cx, |editor, model, cx| {
                 let expected_hints = vec![
                     "main hint #0".to_string(),
                     "main hint #1".to_string(),
@@ -2835,7 +2838,7 @@ pub mod tests {
             }).unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(Some(Autoscroll::Next), cx, |s| {
                     s.select_ranges([Point::new(4, 0)..Point::new(4, 0)])
                 });
@@ -2845,7 +2848,7 @@ pub mod tests {
             INVISIBLE_RANGES_HINTS_REQUEST_DELAY_MILLIS + 100,
         ));
         cx.executor().run_until_parked();
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
                 let expected_hints = vec![
                     "main hint #0".to_string(),
                     "main hint #1".to_string(),
@@ -2868,7 +2871,7 @@ pub mod tests {
 
         editor_edited.store(true, Ordering::Release);
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(None, cx, |s| {
                     s.select_ranges([Point::new(57, 0)..Point::new(57, 0)])
                 });
@@ -2876,7 +2879,7 @@ pub mod tests {
             })
             .unwrap();
         cx.executor().run_until_parked();
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
             let expected_hints = vec![
                 "main hint #0".to_string(),
                 "main hint #1".to_string(),
@@ -2946,24 +2949,24 @@ pub mod tests {
             },
         );
 
-        let worktree_id = project.update(cx, |project, cx| {
+        let worktree_id = project.update(cx, |project, model, cx| {
             project.worktrees(cx).next().unwrap().read(cx).id()
         });
 
         let buffer_1 = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_buffer((worktree_id, "main.rs"), cx)
             })
             .await
             .unwrap();
         let buffer_2 = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_buffer((worktree_id, "other.rs"), cx)
             })
             .await
             .unwrap();
         let multibuffer = cx.new_model(|_| MultiBuffer::new(Capability::ReadWrite));
-        let (buffer_1_excerpts, buffer_2_excerpts) = multibuffer.update(cx, |multibuffer, cx| {
+        let (buffer_1_excerpts, buffer_2_excerpts) = multibuffer.update(cx, |multibuffer, model, cx| {
             let buffer_1_excerpts = multibuffer.push_excerpts(
                 buffer_1.clone(),
                 [ExcerptRange {
@@ -3059,7 +3062,7 @@ pub mod tests {
         cx.executor().run_until_parked();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert_eq!(
                     vec!["main hint #0".to_string(), "other hint #0".to_string()],
                     cached_hint_labels(editor),
@@ -3078,15 +3081,15 @@ pub mod tests {
             .unwrap();
 
         editor
-            .update(cx, |editor, cx| {
-                editor.buffer().update(cx, |multibuffer, cx| {
+            .update(cx, |editor, model, cx| {
+                editor.buffer().update(cx, |multibuffer, model, cx| {
                     multibuffer.remove_excerpts(buffer_2_excerpts, cx)
                 })
             })
             .unwrap();
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert_eq!(
                     vec!["main hint #0".to_string()],
                     cached_hint_labels(editor),
@@ -3117,7 +3120,7 @@ pub mod tests {
         });
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["main hint #0".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -3178,7 +3181,7 @@ pub mod tests {
         );
 
         let buffer = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_local_buffer("/a/main.rs", cx)
             })
             .await
@@ -3216,7 +3219,7 @@ pub mod tests {
 
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.change_selections(None, cx, |s| {
                     s.select_ranges([Point::new(10, 0)..Point::new(10, 0)])
                 })
@@ -3224,7 +3227,7 @@ pub mod tests {
             .unwrap();
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["1".to_string()];
                 assert_eq!(expected_hints, cached_hint_labels(editor));
                 assert_eq!(expected_hints, visible_hint_labels(editor, cx));
@@ -3250,7 +3253,7 @@ pub mod tests {
         let (file_with_hints, editor, fake_server) = prepare_test_objects(cx).await;
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.toggle_inlay_hints(&crate::ToggleInlayHints, cx)
             })
             .unwrap();
@@ -3283,7 +3286,7 @@ pub mod tests {
             .await;
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["1".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -3300,13 +3303,13 @@ pub mod tests {
             .unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.toggle_inlay_hints(&crate::ToggleInlayHints, cx)
             })
             .unwrap();
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert!(
                     cached_hint_labels(editor).is_empty(),
                     "Should clear hints after 2nd toggle"
@@ -3329,7 +3332,7 @@ pub mod tests {
         });
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 let expected_hints = vec!["2".to_string()];
                 assert_eq!(
                     expected_hints,
@@ -3342,13 +3345,13 @@ pub mod tests {
             .unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.toggle_inlay_hints(&crate::ToggleInlayHints, cx)
             })
             .unwrap();
         cx.executor().run_until_parked();
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert!(
                     cached_hint_labels(editor).is_empty(),
                     "Should clear hints after enabling in settings and a 3rd toggle"
@@ -3359,12 +3362,12 @@ pub mod tests {
             .unwrap();
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.toggle_inlay_hints(&crate::ToggleInlayHints, cx)
             })
             .unwrap();
         cx.executor().run_until_parked();
-        editor.update(cx, |editor, cx| {
+        editor.update(cx, |editor, model, cx| {
             let expected_hints = vec!["3".to_string()];
             assert_eq!(
                 expected_hints,
@@ -3421,7 +3424,7 @@ pub mod tests {
         );
 
         let buffer = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_local_buffer("/a/main.rs", cx)
             })
             .await
@@ -3432,7 +3435,7 @@ pub mod tests {
         let editor = cx.add_window(|cx| Editor::for_buffer(buffer, Some(project), cx));
 
         editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 assert!(cached_hint_labels(editor).is_empty());
                 assert!(visible_hint_labels(editor, cx).is_empty());
                 assert_eq!(editor.inlay_hint_cache().version, 0);

@@ -74,7 +74,7 @@ impl SlashCommand for TerminalSlashCommand {
             return Task::ready(Err(anyhow::anyhow!("workspace was dropped")));
         };
 
-        let Some(active_terminal) = resolve_active_terminal(&workspace, cx) else {
+        let Some(active_terminal) = resolve_active_terminal(&workspace, model, cx) else {
             return Task::ready(Err(anyhow::anyhow!("no active terminal")));
         };
 

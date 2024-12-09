@@ -47,7 +47,7 @@ impl Render for UpdateNotification {
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _, cx| {
                         this.workspace
-                            .update(cx, |workspace, cx| {
+                            .update(cx, |workspace, model, cx| {
                                 crate::view_release_notes_locally(workspace, cx);
                             })
                             .log_err();

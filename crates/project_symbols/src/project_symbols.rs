@@ -114,7 +114,7 @@ impl PickerDelegate for ProjectSymbolsDelegate {
             .get(self.selected_match_index)
             .map(|mat| self.symbols[mat.candidate_id].clone())
         {
-            let buffer = self.project.update(cx, |project, cx| {
+            let buffer = self.project.update(cx, |project, model, cx| {
                 project.open_buffer_for_symbol(&symbol, cx)
             });
             let symbol = symbol.clone();
@@ -134,7 +134,7 @@ impl PickerDelegate for ProjectSymbolsDelegate {
                     let editor =
                         workspace.open_project_item::<Editor>(pane, buffer, true, true, cx);
 
-                    editor.update(cx, |editor, cx| {
+                    editor.update(cx, |editor, model, cx| {
                         editor.change_selections(Some(Autoscroll::center()), cx, |s| {
                             s.select_ranges([position..position])
                         });
@@ -166,7 +166,7 @@ impl PickerDelegate for ProjectSymbolsDelegate {
         self.show_worktree_root_name = self.project.read(cx).visible_worktrees(cx).count() > 1;
         let symbols = self
             .project
-            .update(cx, |project, cx| project.symbols(&query, cx));
+            .update(cx, |project, model, cx| project.symbols(&query, cx));
         cx.spawn(|this, mut cx| async move {
             let symbols = symbols.await.log_err();
             if let Some(symbols) = symbols {
@@ -291,7 +291,7 @@ mod tests {
             language_registry.register_fake_lsp("Rust", FakeLspAdapter::default());
 
         let _buffer = project
-            .update(cx, |project, cx| {
+            .update(cx, |project, model, cx| {
                 project.open_local_buffer("/dir/test.rs", cx)
             })
             .await
@@ -342,7 +342,7 @@ mod tests {
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
 
         // Create the project symbols view.
-        let symbols = cx.new_view(|cx| {
+        let symbols = cx.new_model(|model, cx| {
             Picker::uniform_list(
                 ProjectSymbolsDelegate::new(workspace.downgrade(), project.clone()),
                 cx,
@@ -352,25 +352,25 @@ mod tests {
         // Spawn multiples updates before the first update completes,
         // such that in the end, there are no matches. Testing for regression:
         // https://github.com/zed-industries/zed/issues/861
-        symbols.update(cx, |p, cx| {
+        symbols.update(cx, |p, model, cx| {
             p.update_matches("o".to_string(), cx);
             p.update_matches("on".to_string(), cx);
             p.update_matches("onex".to_string(), cx);
         });
 
         cx.run_until_parked();
-        symbols.update(cx, |symbols, _| {
+        symbols.update(cx, |symbols, model, _| {
             assert_eq!(symbols.delegate.matches.len(), 0);
         });
 
         // Spawn more updates such that in the end, there are matches.
-        symbols.update(cx, |p, cx| {
+        symbols.update(cx, |p, model, cx| {
             p.update_matches("one".to_string(), cx);
             p.update_matches("on".to_string(), cx);
         });
 
         cx.run_until_parked();
-        symbols.update(cx, |symbols, _| {
+        symbols.update(cx, |symbols, model, _| {
             let delegate = &symbols.delegate;
             assert_eq!(delegate.matches.len(), 2);
             assert_eq!(delegate.matches[0].string, "ton");
@@ -378,13 +378,13 @@ mod tests {
         });
 
         // Spawn more updates such that in the end, there are again no matches.
-        symbols.update(cx, |p, cx| {
+        symbols.update(cx, |p, model, cx| {
             p.update_matches("o".to_string(), cx);
             p.update_matches("".to_string(), cx);
         });
 
         cx.run_until_parked();
-        symbols.update(cx, |symbols, _| {
+        symbols.update(cx, |symbols, model, _| {
             assert_eq!(symbols.delegate.matches.len(), 0);
         });
     }

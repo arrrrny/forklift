@@ -104,7 +104,7 @@ impl WorktreeIndex {
                 })
                 .await?;
 
-            cx.new_model(|cx| {
+            cx.new_model(|model, cx| {
                 Self::new(
                     worktree,
                     db_connection,

@@ -55,7 +55,7 @@ impl SlashCommand for OutlineSlashCommand {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> Task<SlashCommandResult> {
-        let output = workspace.update(cx, |workspace, cx| {
+        let output = workspace.update(cx, |workspace, model, cx| {
             let Some(active_item) = workspace.active_item(cx) else {
                 return Task::ready(Err(anyhow!("no active tab")));
             };

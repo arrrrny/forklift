@@ -62,7 +62,7 @@ impl Render for ThemeSelector {
 
 impl ThemeSelector {
     pub fn new(delegate: ThemeSelectorDelegate, model: &Model<Self>, cx: &mut AppContext) -> Self {
-        let picker = cx.new_view(|cx| Picker::uniform_list(delegate, cx));
+        let picker = cx.new_model(|model, cx| Picker::uniform_list(delegate, cx));
         Self { picker }
     }
 }
@@ -191,7 +191,7 @@ impl PickerDelegate for ThemeSelectorDelegate {
         });
 
         self.view
-            .update(cx, |_, cx| {
+            .update(cx, |_, model, cx| {
                 cx.emit(DismissEvent);
             })
             .ok();
@@ -204,7 +204,7 @@ impl PickerDelegate for ThemeSelectorDelegate {
         }
 
         self.view
-            .update(cx, |_, cx| cx.emit(DismissEvent))
+            .update(cx, |_, model, cx| cx.emit(DismissEvent))
             .log_err();
     }
 

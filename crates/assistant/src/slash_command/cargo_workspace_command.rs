@@ -128,7 +128,7 @@ impl SlashCommand for CargoWorkspaceSlashCommand {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> Task<SlashCommandResult> {
-        let output = workspace.update(cx, |workspace, cx| {
+        let output = workspace.update(cx, |workspace, model, cx| {
             let project = workspace.project().clone();
             let fs = workspace.project().read(cx).fs().clone();
             let path = Self::path_to_cargo_toml(project, cx);

@@ -12,7 +12,7 @@ pub struct ApplicationMenuStory {
 impl ApplicationMenuStory {
     pub fn new(window: &mut gpui::Window, cx: &mut gpui::AppContext) -> Self {
         Self {
-            menu: cx.new_view(ApplicationMenu::new),
+            menu: cx.new_model(ApplicationMenu::new),
         }
     }
 }

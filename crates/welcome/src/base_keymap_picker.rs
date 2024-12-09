@@ -55,7 +55,7 @@ impl BaseKeymapSelector {
         delegate: BaseKeymapSelectorDelegate,
         model: &Model<BaseKeymapSelector>, cx: &mut AppContext,
     ) -> Self {
-        let picker = cx.new_view(|cx| Picker::uniform_list(delegate, cx));
+        let picker = cx.new_model(|model, cx| Picker::uniform_list(delegate, cx));
         Self { picker }
     }
 }
@@ -182,7 +182,7 @@ impl PickerDelegate for BaseKeymapSelectorDelegate {
         }
 
         self.view
-            .update(cx, |_, cx| {
+            .update(cx, |_, model, cx| {
                 cx.emit(DismissEvent);
             })
             .ok();
@@ -190,7 +190,7 @@ impl PickerDelegate for BaseKeymapSelectorDelegate {
 
     fn dismissed(&mut self, model: &Model<Picker>, cx: &mut AppContext) {
         self.view
-            .update(cx, |_, cx| {
+            .update(cx, |_, model, cx| {
                 cx.emit(DismissEvent);
             })
             .log_err();

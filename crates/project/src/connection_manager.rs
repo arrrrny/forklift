@@ -41,11 +41,11 @@ impl Manager {
         cx: &mut AppContext,
     ) {
         let manager = cx.weak_model();
-        project.update(cx, |_, cx| {
+        project.update(cx, |_, model, cx| {
             let manager = manager.clone();
             cx.on_release(move |project, cx| {
                 manager
-                    .update(cx, |manager, cx| {
+                    .update(cx, |manager, model, cx| {
                         manager.projects.retain(|p| {
                             if let Some(p) = p.upgrade() {
                                 p.read(cx).remote_id() != project.remote_id()
@@ -110,7 +110,7 @@ impl Manager {
             this.update(&mut cx, |_, cx| {
                 for rejoined_project in response.payload.rejoined_projects {
                     if let Some(project) = projects.get(&rejoined_project.id) {
-                        project.update(cx, |project, cx| {
+                        project.update(cx, |project, model, cx| {
                             project.rejoined(rejoined_project, message_id, cx).log_err();
                         });
                     }
@@ -122,7 +122,7 @@ impl Manager {
     fn connection_lost(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         for project in self.projects.drain() {
             if let Some(project) = project.upgrade() {
-                project.update(cx, |project, cx| {
+                project.update(cx, |project, model, cx| {
                     project.disconnected_from_host(cx);
                     project.close(cx);
                 });

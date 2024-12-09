@@ -16,7 +16,7 @@ actions!(debug, [OpenThemePreview]);
 pub fn init(cx: &mut AppContext) {
     cx.observe_new_views(|workspace: &mut Workspace, _| {
         workspace.register_action(|workspace, _: &OpenThemePreview, cx| {
-            let theme_preview = cx.new_view(ThemePreview::new);
+            let theme_preview = cx.new_model(ThemePreview::new);
             workspace.add_item_to_active_pane(Box::new(theme_preview), None, true, cx)
         });
     })
@@ -99,7 +99,7 @@ impl Item for ThemePreview {
     where
         Self: Sized,
     {
-        Some(cx.new_view(Self::new))
+        Some(cx.new_model(Self::new))
     }
 }
 
@@ -553,7 +553,7 @@ impl ThemePreview {
                 Button::new(ElementId::Name(p.name().into()), p.name())
                     .on_click(cx.listener(move |this, _, cx| {
                         this.current_page = p;
-                        cx.notify();
+                        model.notify(cx);
                     }))
                     .selected(p == self.current_page)
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent))

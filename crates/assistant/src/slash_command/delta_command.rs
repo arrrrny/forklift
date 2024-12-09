@@ -79,6 +79,7 @@ impl SlashCommand for DeltaSlashCommand {
                         context_buffer.clone(),
                         workspace.clone(),
                         delegate.clone(),
+                        model,
                         cx,
                     ));
                 }

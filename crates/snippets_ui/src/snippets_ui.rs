@@ -31,12 +31,12 @@ fn configure_snippets(
     let workspace_handle = workspace.weak_handle();
 
     workspace.toggle_modal(cx, move |cx| {
-        ScopeSelector::new(language_registry, workspace_handle, cx)
+        ScopeSelector::new(language_registry, workspace_handle, model, cx)
     });
 }
 
 fn open_folder(workspace: &mut Workspace, _: &OpenFolder, model: &Model<Workspace>, cx: &mut AppContext) {
-    fs::create_dir_all(config_dir().join("snippets")).notify_err(workspace, cx);
+    fs::create_dir_all(config_dir().join("snippets")).notify_err(workspace, model, cx);
     cx.open_with_system(config_dir().join("snippets").borrow());
 }
 
@@ -53,7 +53,7 @@ impl ScopeSelector {
         let delegate =
             ScopeSelectorDelegate::new(workspace, cx.view().downgrade(), language_registry);
 
-        let picker = cx.new_view(|cx| Picker::uniform_list(delegate, cx));
+        let picker = cx.new_model(|model, cx| Picker::uniform_list(delegate, model, cx));
 
         Self { picker }
     }
@@ -151,7 +151,7 @@ impl PickerDelegate for ScopeSelectorDelegate {
 
     fn dismissed(&mut self, model: &Model<Picker>, cx: &mut AppContext) {
         self.scope_selector
-            .update(cx, |_, cx| cx.emit(DismissEvent))
+            .update(cx, |_, model, cx| cx.emit(DismissEvent))
             .log_err();
     }
 
@@ -200,7 +200,7 @@ impl PickerDelegate for ScopeSelectorDelegate {
                 delegate.selected_index = delegate
                     .selected_index
                     .min(delegate.matches.len().saturating_sub(1));
-                cx.notify();
+                model.notify(cx);
             })
             .log_err();
         })

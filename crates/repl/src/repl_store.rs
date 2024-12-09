@@ -34,10 +34,10 @@ impl ReplStore {
     const NAMESPACE: &'static str = "repl";
 
     pub(crate) fn init(fs: Arc<dyn Fs>, telemetry: Arc<Telemetry>, cx: &mut AppContext) {
-        let store = cx.new_model(move |cx| Self::new(fs, telemetry, cx));
+        let store = cx.new_model(move |cx| Self::new(fs, telemetry, model, cx));
 
         store
-            .update(cx, |store, cx| store.refresh_kernelspecs(cx))
+            .update(cx, |store, model, cx| store.refresh_kernelspecs(cx))
             .detach_and_log_err(cx);
 
         cx.set_global(GlobalReplStore(store))
@@ -47,7 +47,12 @@ impl ReplStore {
         cx.global::<GlobalReplStore>().0.clone()
     }
 
-    pub fn new(fs: Arc<dyn Fs>, telemetry: Arc<Telemetry>, model: &Model<Self>, cx: &mut AppContext) -> Self {
+    pub fn new(
+        fs: Arc<dyn Fs>,
+        telemetry: Arc<Telemetry>,
+        model: &Model<Self>,
+        cx: &mut AppContext,
+    ) -> Self {
         let subscriptions = vec![cx.observe_global::<SettingsStore>(move |this, cx| {
             this.set_enabled(JupyterSettings::enabled(cx), cx);
         })];
@@ -119,7 +124,7 @@ impl ReplStore {
             filter.show_namespace(Self::NAMESPACE);
         });
 
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn refresh_python_kernelspecs(
@@ -138,7 +143,7 @@ impl ReplStore {
             this.update(&mut cx, |this, cx| {
                 this.kernel_specifications_for_worktree
                     .insert(worktree_id, kernel_specifications);
-                cx.notify();
+                model.notify(cx);
             })
         })
     }
@@ -168,7 +173,11 @@ impl ReplStore {
         }
     }
 
-    pub fn refresh_kernelspecs(&mut self, model: &Model<Self>, cx: &mut AppContext) -> Task<Result<()>> {
+    pub fn refresh_kernelspecs(
+        &mut self,
+        model: &Model<Self>,
+        cx: &mut AppContext,
+    ) -> Task<Result<()>> {
         let local_kernel_specifications = local_kernel_specifications(self.fs.clone());
 
         let remote_kernel_specifications = self.get_remote_kernel_specifications(cx);
@@ -188,7 +197,7 @@ impl ReplStore {
 
             this.update(&mut cx, |this, cx| {
                 this.kernel_specifications = all_specs;
-                cx.notify();
+                model.notify(cx);
             })
         })
     }

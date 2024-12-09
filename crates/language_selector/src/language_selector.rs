@@ -32,7 +32,7 @@ pub struct LanguageSelector {
 impl LanguageSelector {
     fn register(workspace: &mut Workspace, _: &Model<Workspace>, _: &mut AppContext) {
         workspace.register_action(move |workspace, _: &Toggle, cx| {
-            Self::toggle(workspace, cx);
+            Self::toggle(workspace, model, cx);
         });
     }
 
@@ -46,7 +46,7 @@ impl LanguageSelector {
         let project = workspace.project().clone();
 
         workspace.toggle_modal(cx, move |cx| {
-            LanguageSelector::new(buffer, project, registry, cx)
+            LanguageSelector::new(buffer, project, registry, model, model, cx)
         });
         Some(())
     }
@@ -64,7 +64,7 @@ impl LanguageSelector {
             language_registry,
         );
 
-        let picker = cx.new_view(|cx| Picker::uniform_list(delegate, cx));
+        let picker = cx.new_model(|model, cx| Picker::uniform_list(delegate, model, cx));
         Self { picker }
     }
 }
@@ -214,7 +214,7 @@ impl PickerDelegate for LanguageSelectorDelegate {
 
     fn dismissed(&mut self, model: &Model<Picker>, cx: &mut AppContext) {
         self.language_selector
-            .update(cx, |_, cx| cx.emit(DismissEvent))
+            .update(cx, |_, model, cx| cx.emit(DismissEvent))
             .log_err();
     }
 
@@ -263,7 +263,7 @@ impl PickerDelegate for LanguageSelectorDelegate {
                 delegate.selected_index = delegate
                     .selected_index
                     .min(delegate.matches.len().saturating_sub(1));
-                cx.notify();
+                model.notify(cx);
             })
             .log_err();
         })

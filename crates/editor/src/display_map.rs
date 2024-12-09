@@ -128,9 +128,9 @@ impl DisplayMap {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) -> Self {
-        let buffer_subscription = buffer.update(cx, |buffer, _| buffer.subscribe());
+        let buffer_subscription = buffer.update(cx, |buffer, model, _| buffer.subscribe());
 
-        let tab_size = Self::tab_size(&buffer, cx);
+        let tab_size = Self::tab_size(&buffer, model, cx);
         let buffer_snapshot = buffer.read(cx).snapshot(cx);
         let crease_map = CreaseMap::new(&buffer_snapshot);
         let (inlay_map, snapshot) = InlayMap::new(buffer_snapshot);
@@ -145,7 +145,7 @@ impl DisplayMap {
             excerpt_footer_height,
         );
 
-        cx.observe(&wrap_map, |_, _, cx| cx.notify()).detach();
+        cx.observe(&wrap_map, |_, _, cx| model.notify(cx)).detach();
 
         DisplayMap {
             buffer,
@@ -169,11 +169,11 @@ impl DisplayMap {
         let edits = self.buffer_subscription.consume().into_inner();
         let (inlay_snapshot, edits) = self.inlay_map.sync(buffer_snapshot, edits);
         let (fold_snapshot, edits) = self.fold_map.read(inlay_snapshot.clone(), edits);
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (tab_snapshot, edits) = self.tab_map.sync(fold_snapshot.clone(), edits, tab_size);
-        let (wrap_snapshot, edits) = self
-            .wrap_map
-            .update(cx, |map, cx| map.sync(tab_snapshot.clone(), edits, cx));
+        let (wrap_snapshot, edits) = self.wrap_map.update(cx, |map, model, cx| {
+            map.sync(tab_snapshot.clone(), edits, model, cx)
+        });
         let block_snapshot = self.block_map.read(wrap_snapshot.clone(), edits).snapshot;
 
         DisplaySnapshot {
@@ -216,13 +216,13 @@ impl DisplayMap {
     ) {
         let buffer_snapshot = self.buffer.read(cx).snapshot(cx);
         let edits = self.buffer_subscription.consume().into_inner();
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (snapshot, edits) = self.inlay_map.sync(buffer_snapshot.clone(), edits);
         let (mut fold_map, snapshot, edits) = self.fold_map.write(snapshot, edits);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         self.block_map.read(snapshot, edits);
 
         let inline = creases.iter().filter_map(|crease| {
@@ -240,7 +240,7 @@ impl DisplayMap {
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         let mut block_map = self.block_map.write(snapshot, edits);
         let blocks = creases.into_iter().filter_map(|crease| {
             if let Crease::Block {
@@ -290,19 +290,19 @@ impl DisplayMap {
     ) {
         let snapshot = self.buffer.read(cx).snapshot(cx);
         let edits = self.buffer_subscription.consume().into_inner();
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (snapshot, edits) = self.inlay_map.sync(snapshot, edits);
         let (mut fold_map, snapshot, edits) = self.fold_map.write(snapshot, edits);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         self.block_map.read(snapshot, edits);
         let (snapshot, edits) = fold_map.remove_folds(ranges, type_id);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         self.block_map.write(snapshot, edits);
     }
 
@@ -320,13 +320,13 @@ impl DisplayMap {
             .map(|range| range.start.to_offset(&snapshot)..range.end.to_offset(&snapshot))
             .collect::<Vec<_>>();
         let edits = self.buffer_subscription.consume().into_inner();
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (snapshot, edits) = self.inlay_map.sync(snapshot, edits);
         let (mut fold_map, snapshot, edits) = self.fold_map.write(snapshot, edits);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         self.block_map.read(snapshot, edits);
 
         let (snapshot, edits) =
@@ -334,7 +334,7 @@ impl DisplayMap {
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         let mut block_map = self.block_map.write(snapshot, edits);
         block_map.remove_intersecting_replace_blocks(offset_ranges, inclusive);
     }
@@ -367,13 +367,13 @@ impl DisplayMap {
     ) -> Vec<CustomBlockId> {
         let snapshot = self.buffer.read(cx).snapshot(cx);
         let edits = self.buffer_subscription.consume().into_inner();
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (snapshot, edits) = self.inlay_map.sync(snapshot, edits);
         let (snapshot, edits) = self.fold_map.read(snapshot, edits);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         let mut block_map = self.block_map.write(snapshot, edits);
         block_map.insert(blocks)
     }
@@ -386,13 +386,13 @@ impl DisplayMap {
     ) {
         let snapshot = self.buffer.read(cx).snapshot(cx);
         let edits = self.buffer_subscription.consume().into_inner();
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (snapshot, edits) = self.inlay_map.sync(snapshot, edits);
         let (snapshot, edits) = self.fold_map.read(snapshot, edits);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         let mut block_map = self.block_map.write(snapshot, edits);
         block_map.resize(heights);
     }
@@ -409,13 +409,13 @@ impl DisplayMap {
     ) {
         let snapshot = self.buffer.read(cx).snapshot(cx);
         let edits = self.buffer_subscription.consume().into_inner();
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (snapshot, edits) = self.inlay_map.sync(snapshot, edits);
         let (snapshot, edits) = self.fold_map.read(snapshot, edits);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         let mut block_map = self.block_map.write(snapshot, edits);
         block_map.remove(ids);
     }
@@ -428,13 +428,13 @@ impl DisplayMap {
     ) -> Option<DisplayRow> {
         let snapshot = self.buffer.read(cx).snapshot(cx);
         let edits = self.buffer_subscription.consume().into_inner();
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (snapshot, edits) = self.inlay_map.sync(snapshot, edits);
         let (snapshot, edits) = self.fold_map.read(snapshot, edits);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         let block_map = self.block_map.read(snapshot, edits);
         let block_row = block_map.row_for_block(block_id)?;
         Some(DisplayRow(block_row.0))
@@ -486,8 +486,9 @@ impl DisplayMap {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) -> bool {
-        self.wrap_map
-            .update(cx, |map, cx| map.set_font_with_size(font, font_size, cx))
+        self.wrap_map.update(cx, |map, model, cx| {
+            map.set_font_with_size(font, font_size, model, cx)
+        })
     }
 
     pub fn set_wrap_width(
@@ -497,7 +498,7 @@ impl DisplayMap {
         cx: &mut AppContext,
     ) -> bool {
         self.wrap_map
-            .update(cx, |map, cx| map.set_wrap_width(width, cx))
+            .update(cx, |map, model, cx| map.set_wrap_width(width, model, cx))
     }
 
     pub(crate) fn current_inlays(&self) -> impl Iterator<Item = &Inlay> {
@@ -518,11 +519,11 @@ impl DisplayMap {
         let edits = self.buffer_subscription.consume().into_inner();
         let (snapshot, edits) = self.inlay_map.sync(buffer_snapshot, edits);
         let (snapshot, edits) = self.fold_map.read(snapshot, edits);
-        let tab_size = Self::tab_size(&self.buffer, cx);
+        let tab_size = Self::tab_size(&self.buffer, model, cx);
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         self.block_map.read(snapshot, edits);
 
         let (snapshot, edits) = self.inlay_map.splice(to_remove, to_insert);
@@ -530,7 +531,7 @@ impl DisplayMap {
         let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
         let (snapshot, edits) = self
             .wrap_map
-            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+            .update(cx, |map, model, cx| map.sync(snapshot, edits, model, cx));
         self.block_map.read(snapshot, edits);
     }
 
@@ -1487,7 +1488,7 @@ pub mod tests {
             }
         });
 
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer.clone(),
                 font("Helvetica"),
@@ -1505,7 +1506,7 @@ pub mod tests {
         let mut fold_count = 0;
         let mut blocks = Vec::new();
 
-        let snapshot = map.update(cx, |map, cx| map.snapshot(cx));
+        let snapshot = map.update(cx, |map, model, cx| map.snapshot(cx));
         log::info!("buffer text: {:?}", snapshot.buffer_snapshot.text());
         log::info!("fold text: {:?}", snapshot.fold_snapshot.text());
         log::info!("tab text: {:?}", snapshot.tab_snapshot.text());
@@ -1522,7 +1523,7 @@ pub mod tests {
                         Some(px(rng.gen_range(0.0..=max_wrap_width)))
                     };
                     log::info!("setting wrap width to {:?}", wrap_width);
-                    map.update(cx, |map, cx| map.set_wrap_width(wrap_width, cx));
+                    map.update(cx, |map, model, cx| map.set_wrap_width(wrap_width, model, cx));
                 }
                 20..=29 => {
                     let mut tab_sizes = vec![1, 2, 3, 4];
@@ -1538,7 +1539,7 @@ pub mod tests {
                     });
                 }
                 30..=44 => {
-                    map.update(cx, |map, cx| {
+                    map.update(cx, |map, model, cx| {
                         if rng.gen() || blocks.is_empty() {
                             let buffer = map.snapshot(cx).buffer_snapshot;
                             let block_properties = (0..rng.gen_range(1..=1))
@@ -1570,7 +1571,7 @@ pub mod tests {
                                     }
                                 })
                                 .collect::<Vec<_>>();
-                            blocks.extend(map.insert_blocks(block_properties, cx));
+                            blocks.extend(map.insert_blocks(block_properties, model, cx));
                         } else {
                             blocks.shuffle(&mut rng);
                             let remove_count = rng.gen_range(1..=4.min(blocks.len()));
@@ -1578,7 +1579,7 @@ pub mod tests {
                                 .map(|_| blocks.remove(rng.gen_range(0..blocks.len())))
                                 .collect();
                             log::info!("removing block ids {:?}", block_ids_to_remove);
-                            map.remove_blocks(block_ids_to_remove, cx);
+                            map.remove_blocks(block_ids_to_remove, model, cx);
                         }
                     });
                 }
@@ -1595,12 +1596,12 @@ pub mod tests {
 
                     if rng.gen() && fold_count > 0 {
                         log::info!("unfolding ranges: {:?}", ranges);
-                        map.update(cx, |map, cx| {
-                            map.unfold_intersecting(ranges, true, cx);
+                        map.update(cx, |map, model, cx| {
+                            map.unfold_intersecting(ranges, true, model, cx);
                         });
                     } else {
                         log::info!("folding ranges: {:?}", ranges);
-                        map.update(cx, |map, cx| {
+                        map.update(cx, |map, model, cx| {
                             map.fold(
                                 ranges
                                     .into_iter()
@@ -1612,7 +1613,9 @@ pub mod tests {
                     }
                 }
                 _ => {
-                    buffer.update(cx, |buffer, cx| buffer.randomly_mutate(&mut rng, 5, cx));
+                    buffer.update(cx, |buffer, model, cx| {
+                        buffer.randomly_mutate(&mut rng, 5, model, cx)
+                    });
                 }
             }
 
@@ -1620,7 +1623,7 @@ pub mod tests {
                 notifications.next().await.unwrap();
             }
 
-            let snapshot = map.update(cx, |map, cx| map.snapshot(cx));
+            let snapshot = map.update(cx, |map, model, cx| map.snapshot(cx));
             fold_count = snapshot.fold_count();
             log::info!("buffer text: {:?}", snapshot.buffer_snapshot.text());
             log::info!("fold text: {:?}", snapshot.fold_snapshot.text());
@@ -1730,14 +1733,14 @@ pub mod tests {
 
         _ = cx.update_window(window, |_, cx| {
             let text_layout_details =
-                editor.update(cx, |editor, cx| editor.text_layout_details(cx));
+                editor.update(cx, |editor, model, cx| editor.text_layout_details(cx));
 
             let font_size = px(12.0);
             let wrap_width = Some(px(64.));
 
             let text = "one two three four five\nsix seven eight";
-            let buffer = MultiBuffer::build_simple(text, cx);
-            let map = cx.new_model(|cx| {
+            let buffer = MultiBuffer::build_simple(text, model, cx);
+            let map = cx.new_model(|model, cx| {
                 DisplayMap::new(
                     buffer.clone(),
                     font("Helvetica"),
@@ -1752,7 +1755,7 @@ pub mod tests {
                 )
             });
 
-            let snapshot = map.update(cx, |map, cx| map.snapshot(cx));
+            let snapshot = map.update(cx, |map, model, cx| map.snapshot(cx));
             assert_eq!(
                 snapshot.text_chunks(DisplayRow(0)).collect::<String>(),
                 "one two \nthree four \nfive\nsix seven \neight"
@@ -1817,22 +1820,22 @@ pub mod tests {
             );
 
             let ix = snapshot.buffer_snapshot.text().find("seven").unwrap();
-            buffer.update(cx, |buffer, cx| {
-                buffer.edit([(ix..ix, "and ")], None, cx);
+            buffer.update(cx, |buffer, model, cx| {
+                buffer.edit([(ix..ix, "and ")], None, model, cx);
             });
 
-            let snapshot = map.update(cx, |map, cx| map.snapshot(cx));
+            let snapshot = map.update(cx, |map, model, cx| map.snapshot(cx));
             assert_eq!(
                 snapshot.text_chunks(DisplayRow(1)).collect::<String>(),
                 "three four \nfive\nsix and \nseven eight"
             );
 
             // Re-wrap on font size changes
-            map.update(cx, |map, cx| {
-                map.set_font(font("Helvetica"), px(font_size.0 + 3.), cx)
+            map.update(cx, |map, model, cx| {
+                map.set_font(font("Helvetica"), px(font_size.0 + 3.), model, cx)
             });
 
-            let snapshot = map.update(cx, |map, cx| map.snapshot(cx));
+            let snapshot = map.update(cx, |map, model, cx| map.snapshot(cx));
             assert_eq!(
                 snapshot.text_chunks(DisplayRow(1)).collect::<String>(),
                 "three \nfour five\nsix and \nseven \neight"
@@ -1848,7 +1851,7 @@ pub mod tests {
         let buffer = MultiBuffer::build_simple(&text, cx);
 
         let font_size = px(14.0);
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer.clone(),
                 font("Helvetica"),
@@ -1863,7 +1866,7 @@ pub mod tests {
             )
         });
 
-        buffer.update(cx, |buffer, cx| {
+        buffer.update(cx, |buffer, model, cx| {
             buffer.edit(
                 vec![
                     (
@@ -1885,7 +1888,7 @@ pub mod tests {
         });
 
         assert_eq!(
-            map.update(cx, |map, cx| map.snapshot(cx))
+            map.update(cx, |map, model, cx| map.snapshot(cx))
                 .text_chunks(DisplayRow(1))
                 .collect::<String>()
                 .lines()
@@ -1893,7 +1896,7 @@ pub mod tests {
             Some("    b   bbbbb")
         );
         assert_eq!(
-            map.update(cx, |map, cx| map.snapshot(cx))
+            map.update(cx, |map, model, cx| map.snapshot(cx))
                 .text_chunks(DisplayRow(2))
                 .collect::<String>()
                 .lines()
@@ -1938,13 +1941,13 @@ pub mod tests {
 
         cx.update(|cx| init_test(cx, |s| s.defaults.tab_size = Some(2.try_into().unwrap())));
 
-        let buffer = cx.new_model(|cx| Buffer::local(text, cx).with_language(language, cx));
+        let buffer = cx.new_model(|model, cx| Buffer::local(text, model, cx).with_language(language, model, cx));
         cx.condition(&buffer, |buf, _| !buf.is_parsing()).await;
-        let buffer = cx.new_model(|cx| MultiBuffer::singleton(buffer, cx));
+        let buffer = cx.new_model(|model, cx| MultiBuffer::singleton(buffer, model, cx));
 
         let font_size = px(14.0);
 
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer,
                 font("Helvetica"),
@@ -1978,7 +1981,7 @@ pub mod tests {
             ]
         );
 
-        map.update(cx, |map, cx| {
+        map.update(cx, |map, model, cx| {
             map.fold(
                 vec![Crease::simple(
                     MultiBufferPoint::new(0, 6)..MultiBufferPoint::new(3, 2),
@@ -2041,12 +2044,12 @@ pub mod tests {
 
         cx.update(|cx| init_test(cx, |_| {}));
 
-        let buffer = cx.new_model(|cx| Buffer::local(text, cx).with_language(language, cx));
+        let buffer = cx.new_model(|model, cx| Buffer::local(text, model, cx).with_language(language, model, cx));
         cx.condition(&buffer, |buf, _| !buf.is_parsing()).await;
-        let buffer = cx.new_model(|cx| MultiBuffer::singleton(buffer, cx));
+        let buffer = cx.new_model(|model, cx| MultiBuffer::singleton(buffer, model, cx));
         let buffer_snapshot = buffer.read_with(cx, |buffer, cx| buffer.snapshot(cx));
 
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer,
                 font("Courier"),
@@ -2062,7 +2065,7 @@ pub mod tests {
         });
 
         // Insert a block in the middle of a multi-line string literal
-        map.update(cx, |map, cx| {
+        map.update(cx, |map, model, cx| {
             map.insert_blocks(
                 [BlockProperties {
                     placement: BlockPlacement::Below(
@@ -2115,9 +2118,9 @@ pub mod tests {
 
         cx.update(|cx| init_test(cx, |_| {}));
 
-        let buffer = cx.new_model(|cx| Buffer::local(text, cx));
+        let buffer = cx.new_model(|model, cx| Buffer::local(text, model, cx));
 
-        buffer.update(cx, |buffer, cx| {
+        buffer.update(cx, |buffer, model, cx| {
             buffer.update_diagnostics(
                 LanguageServerId(0),
                 DiagnosticSet::new(
@@ -2136,10 +2139,10 @@ pub mod tests {
             )
         });
 
-        let buffer = cx.new_model(|cx| MultiBuffer::singleton(buffer, cx));
+        let buffer = cx.new_model(|model, cx| MultiBuffer::singleton(buffer, model, cx));
         let buffer_snapshot = buffer.read_with(cx, |buffer, cx| buffer.snapshot(cx));
 
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer,
                 font("Courier"),
@@ -2158,7 +2161,7 @@ pub mod tests {
         let red = gpui::red().to_rgb();
 
         // Insert a block in the middle of a multi-line diagnostic.
-        map.update(cx, |map, cx| {
+        map.update(cx, |map, model, cx| {
             map.highlight_text(
                 TypeId::of::<usize>(),
                 vec![
@@ -2183,7 +2186,7 @@ pub mod tests {
             )
         });
 
-        let snapshot = map.update(cx, |map, cx| map.snapshot(cx));
+        let snapshot = map.update(cx, |map, model, cx| map.snapshot(cx));
         let mut chunks = Vec::<(String, Option<DiagnosticSeverity>, Rgba)>::new();
         for chunk in snapshot.chunks(DisplayRow(0)..DisplayRow(5), true, Default::default()) {
             let color = chunk
@@ -2228,7 +2231,7 @@ pub mod tests {
 
         let buffer = cx.update(|cx| MultiBuffer::build_simple("abcde\nfghij\nklmno\npqrst", cx));
         let buffer_snapshot = buffer.read_with(cx, |buffer, cx| buffer.snapshot(cx));
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer.clone(),
                 font("Courier"),
@@ -2243,7 +2246,7 @@ pub mod tests {
             )
         });
 
-        let snapshot = map.update(cx, |map, cx| {
+        let snapshot = map.update(cx, |map, model, cx| {
             map.insert_blocks(
                 [BlockProperties {
                     placement: BlockPlacement::Replace(
@@ -2255,6 +2258,7 @@ pub mod tests {
                     render: Arc::new(|_| div().into_any()),
                     priority: 0,
                 }],
+                model,
                 cx,
             );
             map.snapshot(cx)
@@ -2366,13 +2370,13 @@ pub mod tests {
 
         cx.update(|cx| init_test(cx, |_| {}));
 
-        let buffer = cx.new_model(|cx| Buffer::local(text, cx).with_language(language, cx));
+        let buffer = cx.new_model(|model, cx| Buffer::local(text, model, cx).with_language(language, model, cx));
         cx.condition(&buffer, |buf, _| !buf.is_parsing()).await;
-        let buffer = cx.new_model(|cx| MultiBuffer::singleton(buffer, cx));
+        let buffer = cx.new_model(|model, cx| MultiBuffer::singleton(buffer, model, cx));
 
         let font_size = px(16.0);
 
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer,
                 font("Courier"),
@@ -2399,7 +2403,7 @@ pub mod tests {
             [("{}\n\n".to_string(), None)]
         );
 
-        map.update(cx, |map, cx| {
+        map.update(cx, |map, model, cx| {
             map.fold(
                 vec![Crease::simple(
                     MultiBufferPoint::new(0, 6)..MultiBufferPoint::new(3, 2),
@@ -2449,14 +2453,14 @@ pub mod tests {
 
         let (text, highlighted_ranges) = marked_text_ranges(r#"constˇ «a»: B = "c «d»""#, false);
 
-        let buffer = cx.new_model(|cx| Buffer::local(text, cx).with_language(language, cx));
+        let buffer = cx.new_model(|model, cx| Buffer::local(text, model, cx).with_language(language, model, cx));
         cx.condition(&buffer, |buf, _| !buf.is_parsing()).await;
 
-        let buffer = cx.new_model(|cx| MultiBuffer::singleton(buffer, cx));
+        let buffer = cx.new_model(|model, cx| MultiBuffer::singleton(buffer, model, cx));
         let buffer_snapshot = buffer.read_with(cx, |buffer, cx| buffer.snapshot(cx));
 
         let font_size = px(16.0);
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer,
                 font("Courier"),
@@ -2478,7 +2482,7 @@ pub mod tests {
             ..Default::default()
         };
 
-        map.update(cx, |map, _cx| {
+        map.update(cx, |map, model, _cx| {
             map.highlight_text(
                 TypeId::of::<MyType>(),
                 highlighted_ranges
@@ -2582,7 +2586,7 @@ pub mod tests {
         let text = "aaa\nbbb\nccc\nddd\neee\nfff\nggg\nhhh\niii\njjj\nkkk\nlll";
         let buffer = MultiBuffer::build_simple(text, cx);
         let font_size = px(14.0);
-        cx.new_model(|cx| {
+        cx.new_model(|model, cx| {
             let mut map = DisplayMap::new(
                 buffer.clone(),
                 font("Helvetica"),
@@ -2621,7 +2625,7 @@ pub mod tests {
         let buffer = MultiBuffer::build_simple(text, cx);
         let font_size = px(14.0);
 
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer.clone(),
                 font("Helvetica"),
@@ -2635,7 +2639,7 @@ pub mod tests {
                 cx,
             )
         });
-        let map = map.update(cx, |map, cx| map.snapshot(cx));
+        let map = map.update(cx, |map, model, cx| map.snapshot(cx));
         assert_eq!(map.text(), "✅       α\nβ   \n🏀β      γ");
         assert_eq!(
             map.text_chunks(DisplayRow(0)).collect::<String>(),
@@ -2698,7 +2702,7 @@ pub mod tests {
 
         let buffer = MultiBuffer::build_simple("aaa\n\t\tbbb", cx);
         let font_size = px(14.0);
-        let map = cx.new_model(|cx| {
+        let map = cx.new_model(|model, cx| {
             DisplayMap::new(
                 buffer.clone(),
                 font("Helvetica"),
@@ -2713,7 +2717,8 @@ pub mod tests {
             )
         });
         assert_eq!(
-            map.update(cx, |map, cx| map.snapshot(cx)).max_point(),
+            map.update(cx, |map, model, cx| map.snapshot(cx))
+                .max_point(),
             DisplayPoint::new(DisplayRow(1), 11)
         )
     }
@@ -2736,7 +2741,7 @@ pub mod tests {
         theme: &SyntaxTheme,
         cx: &mut AppContext,
     ) -> Vec<(String, Option<Hsla>, Option<Hsla>)> {
-        let snapshot = map.update(cx, |map, cx| map.snapshot(cx));
+        let snapshot = map.update(cx, |map, model, cx| map.snapshot(cx));
         let mut chunks: Vec<(String, Option<Hsla>, Option<Hsla>)> = Vec::new();
         for chunk in snapshot.chunks(rows, true, HighlightStyles::default()) {
             let syntax_color = chunk

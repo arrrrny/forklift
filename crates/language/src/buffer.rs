@@ -814,7 +814,7 @@ impl Buffer {
 
     pub fn branch(&mut self, model: &Model<Self>, cx: &mut AppContext) -> Model<Self> {
         let this = cx.handle();
-        cx.new_model(|cx| {
+        cx.new_model(|model, cx| {
             let mut branch = Self {
                 branch_state: Some(BufferBranchState {
                     base_buffer: this.clone(),
@@ -883,7 +883,7 @@ impl Buffer {
             }
         }
 
-        let operation = base_buffer.update(cx, |base_buffer, cx| {
+        let operation = base_buffer.update(cx, |base_buffer, model, cx| {
             // cx.emit(BufferEvent::DiffBaseChanged);
             base_buffer.edit(edits, None, cx)
         });
@@ -1008,13 +1008,13 @@ impl Buffer {
         self.has_conflict = false;
         self.saved_mtime = mtime;
         cx.emit(BufferEvent::Saved);
-        cx.notify();
+        model.notify(cx);
     }
 
     /// This method is called to signal that the buffer has been discarded.
     pub fn discarded(&self, model: &Model<Self>, cx: &mut AppContext) {
         cx.emit(BufferEvent::Discarded);
-        cx.notify();
+        model.notify(cx);
     }
 
     /// Reloads the contents of the buffer from disk.
@@ -1079,7 +1079,7 @@ impl Buffer {
         self.text.set_line_ending(line_ending);
         self.saved_mtime = mtime;
         cx.emit(BufferEvent::Reloaded);
-        cx.notify();
+        model.notify(cx);
     }
 
     /// Updates the [`File`] backing this buffer. This should be called when
@@ -1117,7 +1117,7 @@ impl Buffer {
                 cx.emit(BufferEvent::DirtyChanged);
             }
             cx.emit(BufferEvent::FileHandleChanged);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -1264,7 +1264,7 @@ impl Buffer {
         self.request_autoindent(cx);
         self.parse_status.0.send(ParseStatus::Idle).unwrap();
         cx.emit(BufferEvent::Reparsed);
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn parse_status(&self) -> watch::Receiver<ParseStatus> {
@@ -1885,7 +1885,7 @@ impl Buffer {
             cx,
         );
         self.non_text_state_update_count += 1;
-        cx.notify();
+        model.notify(cx);
     }
 
     /// Clears the selections, so that other replicas of the buffer do not see any selections for
@@ -2067,7 +2067,7 @@ impl Buffer {
         if was_dirty != self.is_dirty() {
             cx.emit(BufferEvent::DirtyChanged);
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn autoindent_ranges<I, T>(&mut self, ranges: I, model: &Model<Self>, cx: &mut AppContext)
@@ -2184,7 +2184,7 @@ impl Buffer {
         self.did_edit(&old_version, was_dirty, cx);
         // Notify independently of whether the buffer was edited as the operations could include a
         // selection update.
-        cx.notify();
+        model.notify(cx);
     }
 
     fn flush_deferred_ops(&mut self, model: &Model<Self>, cx: &mut AppContext) {
@@ -2310,7 +2310,7 @@ impl Buffer {
             self.diagnostics_timestamp = lamport_timestamp;
             self.non_text_state_update_count += 1;
             self.text.lamport_clock.observe(lamport_timestamp);
-            cx.notify();
+            model.notify(cx);
             cx.emit(BufferEvent::DiagnosticsUpdated);
         }
     }
@@ -2331,7 +2331,7 @@ impl Buffer {
     /// Removes the selections for a given peer.
     pub fn remove_peer(&mut self, replica_id: ReplicaId, model: &Model<Self>, cx: &mut AppContext) {
         self.remote_selections.remove(&replica_id);
-        cx.notify();
+        model.notify(cx);
     }
 
     /// Undoes the most recent transaction.
@@ -2466,7 +2466,7 @@ impl Buffer {
             true,
             cx,
         );
-        cx.notify();
+        model.notify(cx);
     }
 
     /// Returns a list of strings which trigger a completion menu for this language.

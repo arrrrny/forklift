@@ -259,7 +259,7 @@ impl Project {
                     cx,
                 )
                 .map(|builder| {
-                    let terminal_handle = cx.new_model(|cx| builder.subscribe(cx));
+                    let terminal_handle = cx.new_model(|model, cx| builder.subscribe(cx));
 
                     this.terminals
                         .local_handles
@@ -274,7 +274,7 @@ impl Project {
                             .position(|terminal| terminal.entity_id() == id)
                         {
                             handles.remove(index);
-                            cx.notify();
+                            model.notify(cx);
                         }
                     })
                     .detach();
@@ -429,7 +429,7 @@ impl Project {
         model: &Model<Project>,
         cx: &mut AppContext,
     ) {
-        terminal_handle.update(cx, |this, _| this.input_bytes(command.into_bytes()));
+        terminal_handle.update(cx, |this, model, _| this.input_bytes(command.into_bytes()));
     }
 
     pub fn local_terminal_handles(&self) -> &Vec<WeakModel<terminal::Terminal>> {

@@ -33,7 +33,9 @@ pub fn init(client: Arc<Client>, cx: &mut AppContext) {
 
     let mut provider = all_language_settings(None, cx).inline_completions.provider;
     if provider == language::language_settings::InlineCompletionProvider::Supermaven {
-        supermaven.update(cx, |supermaven, cx| supermaven.start(client.clone(), cx));
+        supermaven.update(cx, |supermaven, model, cx| {
+            supermaven.start(client.clone(), model, cx)
+        });
     }
 
     cx.observe_global::<SettingsStore>(move |cx| {
@@ -41,9 +43,11 @@ pub fn init(client: Arc<Client>, cx: &mut AppContext) {
         if new_provider != provider {
             provider = new_provider;
             if provider == language::language_settings::InlineCompletionProvider::Supermaven {
-                supermaven.update(cx, |supermaven, cx| supermaven.start(client.clone(), cx));
+                supermaven.update(cx, |supermaven, model, cx| {
+                    supermaven.start(client.clone(), model, cx)
+                });
             } else {
-                supermaven.update(cx, |supermaven, _cx| supermaven.stop());
+                supermaven.update(cx, |supermaven, model, _cx| supermaven.stop());
             }
         }
     })
@@ -51,7 +55,7 @@ pub fn init(client: Arc<Client>, cx: &mut AppContext) {
 
     cx.on_action(|_: &SignOut, cx| {
         if let Some(supermaven) = Supermaven::global(cx) {
-            supermaven.update(cx, |supermaven, _cx| supermaven.sign_out());
+            supermaven.update(cx, |supermaven, model, _cx| supermaven.sign_out());
         }
     });
 }
@@ -94,7 +98,7 @@ impl Supermaven {
                 this.update(&mut cx, |this, cx| {
                     if let Self::Starting = this {
                         *this =
-                            Self::Spawned(SupermavenAgent::new(binary_path, client.clone(), cx)?);
+                            Self::Spawned(SupermavenAgent::new(binary_path, client.clone(), model, cx)?);
                     }
                     anyhow::Ok(())
                 })
@@ -302,7 +306,7 @@ impl SupermavenAgent {
                         this.update(&mut cx, |this, cx| {
                             if let Supermaven::Spawned(this) = this {
                                 this.account_status = AccountStatus::Ready;
-                                cx.notify();
+                                model.notify(cx);
                             }
                         })?;
                         break;

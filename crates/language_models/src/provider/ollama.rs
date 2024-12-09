@@ -85,7 +85,7 @@ impl State {
 
             this.update(&mut cx, |this, cx| {
                 this.available_models = models;
-                cx.notify();
+                model.notify(cx);
             })
         })
     }
@@ -108,7 +108,7 @@ impl OllamaLanguageModelProvider {
     pub fn new(http_client: Arc<dyn HttpClient>, cx: &mut AppContext) -> Self {
         let this = Self {
             http_client: http_client.clone(),
-            state: cx.new_model(|cx| {
+            state: cx.new_model(|model, cx| {
                 let subscription = cx.observe_global::<SettingsStore>({
                     let mut settings = AllLanguageModelSettings::get_global(cx).ollama.clone();
                     move |this: &mut State, cx| {
@@ -116,7 +116,7 @@ impl OllamaLanguageModelProvider {
                         if &settings != new_settings {
                             settings = new_settings.clone();
                             this.restart_fetch_models_task(cx);
-                            cx.notify();
+                            model.notify(cx);
                         }
                     }
                 });
@@ -130,7 +130,7 @@ impl OllamaLanguageModelProvider {
             }),
         };
         this.state
-            .update(cx, |state, cx| state.restart_fetch_models_task(cx));
+            .update(cx, |state, model, cx| state.restart_fetch_models_task(cx));
         this
     }
 }
@@ -208,16 +208,19 @@ impl LanguageModelProvider for OllamaLanguageModelProvider {
     }
 
     fn authenticate(&self, cx: &mut AppContext) -> Task<Result<()>> {
-        self.state.update(cx, |state, cx| state.authenticate(cx))
+        self.state
+            .update(cx, |state, model, cx| state.authenticate(cx))
     }
 
     fn configuration_view(&self, window: &mut gpui::Window, cx: &mut gpui::AppContext) -> AnyView {
         let state = self.state.clone();
-        cx.new_view(|cx| ConfigurationView::new(state, cx)).into()
+        cx.new_model(|model, cx| ConfigurationView::new(state, model, cx))
+            .into()
     }
 
     fn reset_credentials(&self, cx: &mut AppContext) -> Task<Result<()>> {
-        self.state.update(cx, |state, cx| state.fetch_models(cx))
+        self.state
+            .update(cx, |state, model, cx| state.fetch_models(cx))
     }
 }
 
@@ -424,7 +427,7 @@ impl ConfigurationView {
                 }
                 this.update(&mut cx, |this, cx| {
                     this.loading_models_task = None;
-                    cx.notify();
+                    model.notify(cx);
                 })
                 .log_err();
             }
@@ -438,7 +441,7 @@ impl ConfigurationView {
 
     fn retry_connection(&self, window: &mut gpui::Window, cx: &mut gpui::AppContext) {
         self.state
-            .update(cx, |state, cx| state.fetch_models(cx))
+            .update(cx, |state, model, cx| state.fetch_models(cx))
             .detach_and_log_err(cx);
     }
 }

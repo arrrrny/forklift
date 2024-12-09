@@ -16,11 +16,7 @@ pub struct Tooltip {
 }
 
 impl Tooltip {
-    pub fn text(
-        title: impl Into<SharedString>,
-        window: &mut gpui::Window,
-        cx: &mut gpui::AppContext,
-    ) -> Rc<dyn Fn(&mut Window, &mut AppContext) -> AnyElement> {
+    pub fn text(title: impl Into<SharedString>, cx: &mut gpui::AppContext) -> AnyView {
         cx.new_model(|_cx| Self {
             title: title.into(),
             meta: None,
@@ -34,8 +30,8 @@ impl Tooltip {
         action: &dyn Action,
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
-    ) -> Rc<dyn Fn(&mut Window, &mut AppContext) -> AnyElement> {
-        cx.new_model(|cx| Self {
+    ) -> AnyView {
+        cx.new_model(|model, cx| Self {
             title: title.into(),
             meta: None,
             key_binding: KeyBinding::for_action(action, window, cx),
@@ -49,22 +45,23 @@ impl Tooltip {
         focus_handle: &FocusHandle,
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
-    ) -> Rc<dyn Fn(&mut Window, &mut AppContext) -> AnyElement> {
-        cx.new_model(|cx| Self {
+    ) -> AnyView {
+        cx.new_model(|model, cx| Self {
             title: title.into(),
             meta: None,
             key_binding: KeyBinding::for_action_in(action, focus_handle, window, cx),
         })
         .into()
     }
+
     pub fn with_meta(
         title: impl Into<SharedString>,
         action: Option<&dyn Action>,
         meta: impl Into<SharedString>,
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
-    ) -> Rc<dyn Fn(&mut Window, &mut AppContext) -> AnyElement> {
-        cx.new_model(|cx| Self {
+    ) -> AnyView {
+        cx.new_model(|model, cx| Self {
             title: title.into(),
             meta: Some(meta.into()),
             key_binding: action.and_then(|action| KeyBinding::for_action(action, window, cx)),

@@ -28,7 +28,7 @@ pub struct ToolchainSelector {
 impl ToolchainSelector {
     fn register(workspace: &mut Workspace, _: &Model<Workspace>, _: &mut AppContext) {
         workspace.register_action(move |workspace, _: &Select, cx| {
-            Self::toggle(workspace, cx);
+            Self::toggle(workspace, model, cx);
         });
     }
 
@@ -65,7 +65,7 @@ impl ToolchainSelector {
                             worktree_id,
                             worktree_root_path,
                             language_name,
-                            cx,
+                            model, cx,
                         )
                     });
                 })
@@ -86,7 +86,7 @@ impl ToolchainSelector {
         model: &Model<Self>, cx: &mut AppContext,
     ) -> Self {
         let view = cx.view().downgrade();
-        let picker = cx.new_view(|cx| {
+        let picker = cx.new_model(|model, cx| {
             let delegate = ToolchainSelectorDelegate::new(
                 active_toolchain,
                 view,
@@ -95,9 +95,9 @@ impl ToolchainSelector {
                 worktree_root,
                 project,
                 language_name,
-                cx,
+                model, cx,
             );
-            Picker::uniform_list(delegate, cx)
+            Picker::uniform_list(delegate, model, cx)
         });
         Self { picker }
     }
@@ -222,7 +222,7 @@ impl PickerDelegate for ToolchainSelectorDelegate {
             let toolchain = self.candidates.toolchains[string_match.candidate_id].clone();
             if let Some(workspace_id) = self
                 .workspace
-                .update(cx, |this, _| this.database_id())
+                .update(cx, |this, model, _| this.database_id())
                 .ok()
                 .flatten()
             {
@@ -235,7 +235,7 @@ impl PickerDelegate for ToolchainSelectorDelegate {
                         .log_err();
                     workspace
                         .update(&mut cx, |this, cx| {
-                            this.project().update(cx, |this, cx| {
+                            this.project().update(cx, |this, model, cx| {
                                 this.activate_toolchain(worktree_id, toolchain, cx)
                             })
                         })
@@ -251,7 +251,7 @@ impl PickerDelegate for ToolchainSelectorDelegate {
 
     fn dismissed(&mut self, model: &Model<Picker>, cx: &mut AppContext) {
         self.toolchain_selector
-            .update(cx, |_, cx| cx.emit(DismissEvent))
+            .update(cx, |_, model, cx| cx.emit(DismissEvent))
             .log_err();
     }
 
@@ -316,7 +316,7 @@ impl PickerDelegate for ToolchainSelectorDelegate {
                 delegate.selected_index = delegate
                     .selected_index
                     .min(delegate.matches.len().saturating_sub(1));
-                cx.notify();
+                model.notify(cx);
             })
             .log_err();
         })

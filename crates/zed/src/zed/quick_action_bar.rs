@@ -50,7 +50,7 @@ impl QuickActionBar {
             toggle_settings_handle: Default::default(),
             workspace: workspace.weak_handle(),
         };
-        this.apply_settings(cx);
+        this.apply_settings(model, cx);
         cx.observe_global::<SettingsStore>(|this, cx| this.apply_settings(cx))
             .detach();
         this
@@ -126,7 +126,7 @@ impl Render for QuickActionBar {
                 {
                     let buffer_search_bar = self.buffer_search_bar.clone();
                     move |_, cx| {
-                        buffer_search_bar.update(cx, |search_bar, cx| {
+                        buffer_search_bar.update(cx, |search_bar, model, cx| {
                             search_bar.toggle(&buffer_search::Deploy::find(), cx)
                         });
                     }
@@ -145,7 +145,7 @@ impl Render for QuickActionBar {
                 let workspace = self.workspace.clone();
                 move |_, cx| {
                     if let Some(workspace) = workspace.upgrade() {
-                        workspace.update(cx, |workspace, cx| {
+                        workspace.update(cx, |workspace, model, cx| {
                             AssistantPanel::inline_assist(workspace, &InlineAssist::default(), cx);
                         });
                     }
@@ -216,7 +216,7 @@ impl Render for QuickActionBar {
             .anchor(AnchorCorner::TopRight)
             .with_handle(self.toggle_settings_handle.clone())
             .menu(move |cx| {
-                let menu = ContextMenu::build(cx, |mut menu, _| {
+                let menu = ContextMenu::build(cx, |mut menu, model, window, cx| {
                     if supports_inlay_hints {
                         menu = menu.toggleable_entry(
                             "Inlay Hints",
@@ -227,7 +227,7 @@ impl Render for QuickActionBar {
                                 let editor = editor.clone();
                                 move |cx| {
                                     editor
-                                        .update(cx, |editor, cx| {
+                                        .update(cx, |editor, model, cx| {
                                             editor.toggle_inlay_hints(
                                                 &editor::actions::ToggleInlayHints,
                                                 cx,
@@ -248,7 +248,7 @@ impl Render for QuickActionBar {
                             let editor = editor.clone();
                             move |cx| {
                                 editor
-                                    .update(cx, |editor, cx| {
+                                    .update(cx, |editor, model, cx| {
                                         editor.toggle_selection_menu(
                                             &editor::actions::ToggleSelectionMenu,
                                             cx,
@@ -268,7 +268,7 @@ impl Render for QuickActionBar {
                             let editor = editor.clone();
                             move |cx| {
                                 editor
-                                    .update(cx, |editor, cx| {
+                                    .update(cx, |editor, model, cx| {
                                         editor.toggle_auto_signature_help_menu(
                                             &editor::actions::ToggleAutoSignatureHelp,
                                             cx,
@@ -290,7 +290,7 @@ impl Render for QuickActionBar {
                             let editor = editor.clone();
                             move |cx| {
                                 editor
-                                    .update(cx, |editor, cx| {
+                                    .update(cx, |editor, model, cx| {
                                         editor.toggle_git_blame_inline(
                                             &editor::actions::ToggleGitBlameInline,
                                             cx,
@@ -310,7 +310,7 @@ impl Render for QuickActionBar {
                             let editor = editor.clone();
                             move |cx| {
                                 editor
-                                    .update(cx, |editor, cx| {
+                                    .update(cx, |editor, model, cx| {
                                         editor
                                             .toggle_git_blame(&editor::actions::ToggleGitBlame, cx)
                                     })
@@ -416,7 +416,7 @@ impl ToolbarItemView for QuickActionBar {
                         inlay_hints_enabled = new_inlay_hints_enabled;
                         supports_inlay_hints = new_supports_inlay_hints;
                         if should_notify {
-                            cx.notify()
+                            model.notify(cx)
                         }
                     }));
             }

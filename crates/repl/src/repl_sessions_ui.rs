@@ -38,16 +38,16 @@ pub fn init(cx: &mut AppContext) {
                     .find_map(|item| item.downcast::<ReplSessionsPage>());
 
                 if let Some(existing) = existing {
-                    workspace.activate_item(&existing, true, true, cx);
+                    workspace.activate_item(&existing, true, true, model, cx);
                 } else {
                     let repl_sessions_page = ReplSessionsPage::new(cx);
-                    workspace.add_item_to_active_pane(Box::new(repl_sessions_page), None, true, cx)
+                    workspace.add_item_to_active_pane(Box::new(repl_sessions_page), None, true, model, cx)
                 }
             });
 
             workspace.register_action(|_workspace, _: &RefreshKernelspecs, cx| {
                 let store = ReplStore::global(cx);
-                store.update(cx, |store, cx| {
+                store.update(cx, |store, model, cx| {
                     store.refresh_kernelspecs(cx).detach();
                 });
             });
@@ -83,9 +83,9 @@ pub fn init(cx: &mut AppContext) {
 
             if let (Some(project_path), Some(project)) = (project_path, project) {
                 let store = ReplStore::global(cx);
-                store.update(cx, |store, cx| {
+                store.update(cx, |store, model, cx| {
                     store
-                        .refresh_python_kernelspecs(project_path.worktree_id, &project, cx)
+                        .refresh_python_kernelspecs(project_path.worktree_id, &project, model, cx)
                         .detach_and_log_err(cx);
                 });
             }
@@ -98,7 +98,7 @@ pub fn init(cx: &mut AppContext) {
                             return;
                         }
 
-                        crate::run(editor_handle.clone(), true, cx).log_err();
+                        crate::run(editor_handle.clone(), true, model, cx).log_err();
                     }
                 })
                 .detach();
@@ -111,7 +111,7 @@ pub fn init(cx: &mut AppContext) {
                             return;
                         }
 
-                        crate::run(editor_handle.clone(), false, cx).log_err();
+                        crate::run(editor_handle.clone(), false, model, cx).log_err();
                     }
                 })
                 .detach();
@@ -127,12 +127,12 @@ pub struct ReplSessionsPage {
 
 impl ReplSessionsPage {
     pub fn new(model: &Model<Workspace>, cx: &mut AppContext) -> View<Self> {
-        cx.new_view(|model: &Model<Self>, cx: &mut AppContext| {
+        cx.new_model(|model: &Model<Self>, cx: &mut AppContext| {
             let focus_handle = cx.focus_handle();
 
             let subscriptions = vec![
-                cx.on_focus_in(&focus_handle, |_this, cx| cx.notify()),
-                cx.on_focus_out(&focus_handle, |_this, _event, cx| cx.notify()),
+                cx.on_focus_in(&focus_handle, |_this, cx| model.notify(cx)),
+                cx.on_focus_out(&focus_handle, |_this, _event, cx| model.notify(cx)),
             ];
 
             Self {
@@ -183,7 +183,7 @@ impl Render for ReplSessionsPage {
     fn render(&mut self, model: &Model<Self>, cx: &mut AppContext) -> impl IntoElement {
         let store = ReplStore::global(cx);
 
-        let (kernel_specifications, sessions) = store.update(cx, |store, _cx| {
+        let (kernel_specifications, sessions) = store.update(cx, |store, model, _cx| {
             (
                 store
                     .pure_jupyter_kernel_specifications()
@@ -224,7 +224,7 @@ impl Render for ReplSessionsPage {
             return ReplSessionsContainer::new("No Jupyter Kernel Sessions").child(
                 v_flex()
                     .child(Label::new(instructions))
-                    .children(KeyBinding::for_action(&Run, cx)),
+                    .children(KeyBinding::for_action(&Run, model, cx)),
             );
         }
 

@@ -56,15 +56,16 @@ impl FocusableView for TextField {
 
 impl TextField {
     pub fn new(
-        window: &mut gpui::Window, cx: &mut gpui::AppContext,
+        window: &mut gpui::Window,
+        cx: &mut gpui::AppContext,
         label: impl Into<SharedString>,
         placeholder: impl Into<SharedString>,
     ) -> Self {
         let placeholder_text = placeholder.into();
 
-        let editor = cx.new_view(|cx| {
+        let editor = cx.new_model(|model, cx| {
             let mut input = Editor::single_line(cx);
-            input.set_placeholder_text(placeholder_text.clone(), cx);
+            input.set_placeholder_text(placeholder_text.clone(), model, cx);
             input
         });
 
@@ -91,7 +92,7 @@ impl TextField {
     pub fn set_disabled(&mut self, disabled: bool, model: &Model<Self>, cx: &mut AppContext) {
         self.disabled = disabled;
         self.editor
-            .update(cx, |editor, _| editor.set_read_only(disabled))
+            .update(cx, |editor, model, _| editor.set_read_only(disabled))
     }
 
     pub fn editor(&self) -> &View<Editor> {

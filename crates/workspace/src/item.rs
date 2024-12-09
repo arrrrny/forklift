@@ -383,7 +383,7 @@ where
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> Option<Task<Result<()>>> {
-        self.update(cx, |this, cx| {
+        self.update(cx, |this, model, cx| {
             this.serialize(workspace, cx.entity_id().as_u64(), closing, cx)
         })
     }
@@ -647,7 +647,7 @@ impl<T: Item> ItemHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> Option<Box<dyn ItemHandle>> {
-        self.update(cx, |item, cx| item.clone_on_split(workspace_id, cx))
+        self.update(cx, |item, model, cx| item.clone_on_split(workspace_id, cx))
             .map(|handle| Box::new(handle) as Box<dyn ItemHandle>)
     }
 
@@ -659,7 +659,7 @@ impl<T: Item> ItemHandle for View<T> {
     ) {
         let weak_item = self.downgrade();
         let history = pane.read(cx).nav_history_for_item(self);
-        self.update(cx, |this, cx| {
+        self.update(cx, |this, model, cx| {
             this.set_nav_history(history, cx);
             this.added_to_workspace(workspace, cx);
         });
@@ -755,16 +755,16 @@ impl<T: Item> ItemHandle for View<T> {
 
                     T::to_item_events(event, |event| match event {
                         ItemEvent::CloseItem => {
-                            pane.update(cx, |pane, cx| {
+                            pane.update(cx, |pane, model, cx| {
                                 pane.close_item_by_id(item.item_id(), crate::SaveIntent::Close, cx)
                             })
                             .detach_and_log_err(cx);
                         }
 
                         ItemEvent::UpdateTab => {
-                            pane.update(cx, |_, cx| {
+                            pane.update(cx, |_, model, cx| {
                                 cx.emit(pane::Event::ChangeItemTitle);
-                                cx.notify();
+                                model.notify(cx);
                             });
                         }
 
@@ -778,7 +778,7 @@ impl<T: Item> ItemHandle for View<T> {
                                     Pane::autosave_item(&item, workspace.project().clone(), cx)
                                 });
                             }
-                            pane.update(cx, |pane, cx| pane.handle_item_edit(item.item_id(), cx));
+                            pane.update(cx, |pane, model, cx| pane.handle_item_edit(item.item_id(), cx));
                         }
 
                         _ => {}
@@ -816,15 +816,15 @@ impl<T: Item> ItemHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) {
-        self.update(cx, |this, cx| this.discarded(project, cx));
+        self.update(cx, |this, model, cx| this.discarded(project, cx));
     }
 
     fn deactivated(&self, window: &mut gpui::Window, cx: &mut gpui::AppContext) {
-        self.update(cx, |this, cx| this.deactivated(cx));
+        self.update(cx, |this, model, cx| this.deactivated(cx));
     }
 
     fn workspace_deactivated(&self, window: &mut gpui::Window, cx: &mut gpui::AppContext) {
-        self.update(cx, |this, cx| this.workspace_deactivated(cx));
+        self.update(cx, |this, model, cx| this.workspace_deactivated(cx));
     }
 
     fn navigate(
@@ -833,7 +833,7 @@ impl<T: Item> ItemHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> bool {
-        self.update(cx, |this, cx| this.navigate(data, cx))
+        self.update(cx, |this, model, cx| this.navigate(data, cx))
     }
 
     fn item_id(&self) -> EntityId {
@@ -867,7 +867,7 @@ impl<T: Item> ItemHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> Task<Result<()>> {
-        self.update(cx, |item, cx| item.save(format, project, cx))
+        self.update(cx, |item, model, cx| item.save(format, project, cx))
     }
 
     fn save_as(
@@ -877,7 +877,7 @@ impl<T: Item> ItemHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> Task<anyhow::Result<()>> {
-        self.update(cx, |item, cx| item.save_as(project, path, cx))
+        self.update(cx, |item, model, cx| item.save_as(project, path, cx))
     }
 
     fn reload(
@@ -886,7 +886,7 @@ impl<T: Item> ItemHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> Task<Result<()>> {
-        self.update(cx, |item, cx| item.reload(project, cx))
+        self.update(cx, |item, model, cx| item.reload(project, cx))
     }
 
     fn act_as_type<'a>(&'a self, type_id: TypeId, cx: &'a AppContext) -> Option<AnyView> {
@@ -1078,7 +1078,7 @@ impl<T: FollowableItem> FollowableItemHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) {
-        self.update(cx, |this, cx| this.set_leader_peer_id(leader_peer_id, cx))
+        self.update(cx, |this, model, cx| this.set_leader_peer_id(leader_peer_id, cx))
     }
 
     fn to_state_proto(&self, window: &Window, cx: &AppContext) -> Option<proto::view::Variant> {
@@ -1110,7 +1110,7 @@ impl<T: FollowableItem> FollowableItemHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> Task<Result<()>> {
-        self.update(cx, |this, cx| this.apply_update_proto(project, message, cx))
+        self.update(cx, |this, model, cx| this.apply_update_proto(project, message, cx))
     }
 
     fn is_project_item(&self, window: &Window, cx: &AppContext) -> bool {
@@ -1376,7 +1376,7 @@ pub mod test {
         where
             Self: Sized,
         {
-            Some(cx.new_view(|cx| Self {
+            Some(cx.new_model(|model, cx| Self {
                 state: self.state.clone(),
                 label: self.label.clone(),
                 save_count: self.save_count,
@@ -1457,7 +1457,7 @@ pub mod test {
             window: &mut gpui::Window,
             cx: &mut gpui::AppContext,
         ) -> Task<anyhow::Result<View<Self>>> {
-            let view = cx.new_view(|cx| Self::new_deserialized(workspace_id, cx));
+            let view = cx.new_model(|model, cx| Self::new_deserialized(workspace_id, cx));
             Task::ready(Ok(view))
         }
 

@@ -100,7 +100,7 @@ pub fn init(cx: &mut AppContext) {
     VimSettings::register(cx);
     VimGlobals::register(cx);
 
-    cx.observe_new_views(|editor: &mut Editor, cx| Vim::register(editor, cx))
+    cx.observe_new_views(|editor: &mut Editor, cx| Vim::register(editor, model, cx))
         .detach();
 
     cx.observe_new_views(|workspace: &mut Workspace, _| {
@@ -174,7 +174,7 @@ pub fn init(cx: &mut AppContext) {
                 .and_then(|editor| editor.read(cx).addon::<VimAddon>().cloned());
             let Some(vim) = vim else { return };
             vim.view
-                .update(cx, |_, cx| cx.defer(|vim, cx| vim.search_submit(cx)))
+                .update(cx, |_, model, cx| cx.defer(|vim, cx| vim.search_submit(cx)))
         });
     })
     .detach();
@@ -243,7 +243,7 @@ impl Vim {
     pub fn new(model: &Model<Editor>, cx: &mut AppContext) -> View<Self> {
         let editor = cx.view().clone();
 
-        cx.new_view(|cx| Vim {
+        cx.new_model(|model, cx| Vim {
             mode: Mode::Normal,
             last_mode: Mode::Normal,
             temp_mode: false,
@@ -298,14 +298,14 @@ impl Vim {
             }
             was_enabled = enabled;
             if enabled {
-                Self::activate(editor, cx)
+                Self::activate(editor, model, cx)
             } else {
-                Self::deactivate(editor, cx)
+                Self::deactivate(editor, model, cx)
             }
         })
         .detach();
         if was_enabled {
-            Self::activate(editor, cx)
+            Self::activate(editor, model, cx)
         }
     }
 
@@ -314,40 +314,40 @@ impl Vim {
 
         editor.register_addon(VimAddon { view: vim.clone() });
 
-        vim.update(cx, |_, cx| {
+        vim.update(cx, |_, model, cx| {
             Vim::action(editor, cx, |vim, action: &SwitchMode, cx| {
-                vim.switch_mode(action.0, false, cx)
+                vim.switch_mode(action.0, false, model, cx)
             });
 
             Vim::action(editor, cx, |vim, action: &PushOperator, cx| {
-                vim.push_operator(action.0.clone(), cx)
+                vim.push_operator(action.0.clone(), model, cx)
             });
 
             Vim::action(editor, cx, |vim, _: &ClearOperators, cx| {
                 vim.clear_operator(cx)
             });
             Vim::action(editor, cx, |vim, n: &Number, cx| {
-                vim.push_count_digit(n.0, cx);
+                vim.push_count_digit(n.0, model, cx);
             });
             Vim::action(editor, cx, |vim, _: &Tab, cx| {
-                vim.input_ignored(" ".into(), cx)
+                vim.input_ignored(" ".into(), model, cx)
             });
             Vim::action(editor, cx, |vim, _: &Enter, cx| {
-                vim.input_ignored("\n".into(), cx)
+                vim.input_ignored("\n".into(), model, cx)
             });
 
-            normal::register(editor, cx);
-            insert::register(editor, cx);
-            helix::register(editor, cx);
-            motion::register(editor, cx);
-            command::register(editor, cx);
-            replace::register(editor, cx);
-            indent::register(editor, cx);
-            rewrap::register(editor, cx);
-            object::register(editor, cx);
-            visual::register(editor, cx);
-            change_list::register(editor, cx);
-            digraph::register(editor, cx);
+            normal::register(editor, model, cx);
+            insert::register(editor, model, cx);
+            helix::register(editor, model, cx);
+            motion::register(editor, model, cx);
+            command::register(editor, model, cx);
+            replace::register(editor, model, cx);
+            indent::register(editor, model, cx);
+            rewrap::register(editor, model, cx);
+            object::register(editor, model, cx);
+            visual::register(editor, model, cx);
+            change_list::register(editor, model, cx);
+            digraph::register(editor, model, cx);
 
             cx.defer(|vim, cx| {
                 vim.focused(false, cx);
@@ -356,14 +356,14 @@ impl Vim {
     }
 
     fn deactivate(editor: &mut Editor, model: &Model<Editor>, cx: &mut AppContext) {
-        editor.set_cursor_shape(CursorShape::Bar, cx);
-        editor.set_clip_at_line_ends(false, cx);
+        editor.set_cursor_shape(CursorShape::Bar, model, cx);
+        editor.set_clip_at_line_ends(false, model, cx);
         editor.set_collapse_matches(false);
         editor.set_input_enabled(true);
         editor.set_autoindent(true);
         editor.selections.line_mode = false;
         editor.unregister_addon::<VimAddon>();
-        editor.set_relative_line_number(None, cx);
+        editor.set_relative_line_number(None, model, cx);
         if let Some(vim) = Vim::globals(cx).focused_vim() {
             if vim.entity_id() == cx.view().entity_id() {
                 Vim::globals(cx).focused_vim = None;
@@ -411,7 +411,7 @@ impl Vim {
                     return;
                 }
             }
-            self.switch_mode(Mode::Insert, false, cx)
+            self.switch_mode(Mode::Insert, false, model, cx)
         }
         if let Some(action) = keystroke_event.action.as_ref() {
             // Keystroke is handled by the vim system, so continue forward
@@ -425,11 +425,11 @@ impl Vim {
         if let Some(operator) = self.active_operator() {
             match operator {
                 Operator::Literal { prefix } => {
-                    self.handle_literal_keystroke(keystroke_event, prefix.unwrap_or_default(), cx);
+                    self.handle_literal_keystroke(keystroke_event, prefix.unwrap_or_default(), model, cx);
                 }
                 _ if !operator.is_waiting(self.mode) => {
                     self.clear_operator(cx);
-                    self.stop_recording_immediately(Box::new(ClearOperators), cx)
+                    self.stop_recording_immediately(Box::new(ClearOperators), model, cx)
                 }
                 _ => {}
             }
@@ -438,13 +438,13 @@ impl Vim {
 
     fn handle_editor_event(&mut self, event: &EditorEvent, model: &Model<Self>, cx: &mut AppContext) {
         match event {
-            EditorEvent::Focused => self.focused(true, cx),
+            EditorEvent::Focused => self.focused(true, model, cx),
             EditorEvent::Blurred => self.blurred(cx),
             EditorEvent::SelectionsChanged { local: true } => {
                 self.local_selections_changed(cx);
             }
             EditorEvent::InputIgnored { text } => {
-                self.input_ignored(text.clone(), cx);
+                self.input_ignored(text.clone(), model, cx);
                 Vim::globals(cx).observe_insertion(text, None)
             }
             EditorEvent::InputHandled {
@@ -452,10 +452,10 @@ impl Vim {
                 utf16_range_to_replace: range_to_replace,
             } => Vim::globals(cx).observe_insertion(text, range_to_replace.clone()),
             EditorEvent::TransactionBegun { transaction_id } => {
-                self.transaction_begun(*transaction_id, cx)
+                self.transaction_begun(*transaction_id, model, cx)
             }
             EditorEvent::TransactionUndone { transaction_id } => {
-                self.transaction_undone(transaction_id, cx)
+                self.transaction_undone(transaction_id, model, cx)
             }
             EditorEvent::Edited { .. } => self.push_to_change_list(cx),
             EditorEvent::FocusedIn => self.sync_vim_settings(cx),
@@ -501,8 +501,8 @@ impl Vim {
     pub fn switch_mode(&mut self, mode: Mode, leave_selections: bool, model: &Model<Self>, cx: &mut AppContext) {
         if self.temp_mode && mode == Mode::Normal {
             self.temp_mode = false;
-            self.switch_mode(Mode::Normal, leave_selections, cx);
-            self.switch_mode(Mode::Insert, false, cx);
+            self.switch_mode(Mode::Normal, leave_selections, model, cx);
+            self.switch_mode(Mode::Insert, false, model, cx);
             return;
         } else if self.temp_mode
             && !matches!(mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock)
@@ -534,7 +534,7 @@ impl Vim {
         {
             self.update_editor(cx, |vim, editor, cx| {
                 let is_relative = vim.mode != Mode::Insert;
-                editor.set_relative_line_number(Some(is_relative), cx)
+                editor.set_relative_line_number(Some(is_relative), model, cx)
             });
         }
 
@@ -543,7 +543,7 @@ impl Vim {
         }
 
         if !mode.is_visual() && last_mode.is_visual() {
-            self.create_visual_marks(last_mode, cx);
+            self.create_visual_marks(last_mode, model, cx);
         }
 
         // Adjust selections
@@ -717,7 +717,7 @@ impl Vim {
         let Some(editor) = self.editor() else {
             return;
         };
-        let newest_selection_empty = editor.update(cx, |editor, cx| {
+        let newest_selection_empty = editor.update(cx, |editor, model, cx| {
             editor.selections.newest::<usize>(cx).is_empty()
         });
         let editor = editor.read(cx);
@@ -730,7 +730,7 @@ impl Vim {
                 && editor.leader_peer_id().is_none()
         {
             if preserve_selection {
-                self.switch_mode(Mode::Visual, true, cx);
+                self.switch_mode(Mode::Visual, true, model, cx);
             } else {
                 self.update_editor(cx, |_, editor, cx| {
                     editor.set_clip_at_line_ends(false, cx);
@@ -749,7 +749,7 @@ impl Vim {
         if VimSettings::get_global(cx).toggle_relative_line_numbers {
             if let Some(old_vim) = Vim::globals(cx).focused_vim() {
                 if old_vim.entity_id() != cx.view().entity_id() {
-                    old_vim.update(cx, |vim, cx| {
+                    old_vim.update(cx, |vim, model, cx| {
                         vim.update_editor(cx, |_, editor, cx| {
                             editor.set_relative_line_number(None, cx)
                         });
@@ -757,13 +757,13 @@ impl Vim {
 
                     self.update_editor(cx, |vim, editor, cx| {
                         let is_relative = vim.mode != Mode::Insert;
-                        editor.set_relative_line_number(Some(is_relative), cx)
+                        editor.set_relative_line_number(Some(is_relative), model, cx)
                     });
                 }
             } else {
                 self.update_editor(cx, |vim, editor, cx| {
                     let is_relative = vim.mode != Mode::Insert;
-                    editor.set_relative_line_number(Some(is_relative), cx)
+                    editor.set_relative_line_number(Some(is_relative), model, cx)
                 });
             }
         }
@@ -771,17 +771,17 @@ impl Vim {
     }
 
     fn blurred(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        self.stop_recording_immediately(NormalBefore.boxed_clone(), cx);
+        self.stop_recording_immediately(NormalBefore.boxed_clone(), model, cx);
         self.store_visual_marks(cx);
         self.clear_operator(cx);
         self.update_editor(cx, |_, editor, cx| {
-            editor.set_cursor_shape(language::CursorShape::Hollow, cx);
+            editor.set_cursor_shape(language::CursorShape::Hollow, model, cx);
         });
     }
 
     fn cursor_shape_changed(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         self.update_editor(cx, |vim, editor, cx| {
-            editor.set_cursor_shape(vim.cursor_shape(), cx);
+            editor.set_cursor_shape(vim.cursor_shape(), model, cx);
         });
     }
 
@@ -791,7 +791,7 @@ impl Vim {
         update: impl FnOnce(&mut Self, &mut Editor, &Model<Editor>, &mut AppContext) -> S,
     ) -> Option<S> {
         let editor = self.editor.upgrade()?;
-        Some(editor.update(cx, |editor, cx| update(self, editor, cx)))
+        Some(editor.update(cx, |editor, model, cx| update(self, editor, cx)))
     }
 
     fn editor_selections(&mut self, model: &Model<Self>, cx: &mut AppContext) -> Vec<Range<Anchor>> {
@@ -816,7 +816,7 @@ impl Vim {
                 globals.recorded_count = None;
 
                 let selections = self.editor().map(|editor| {
-                    editor.update(cx, |editor, cx| {
+                    editor.update(cx, |editor, model, cx| {
                         (
                             editor.selections.oldest::<Point>(cx),
                             editor.selections.newest::<Point>(cx),
@@ -997,7 +997,7 @@ impl Vim {
                         }
                     });
                 });
-                self.switch_mode(Mode::Normal, true, cx)
+                self.switch_mode(Mode::Normal, true, model, cx)
             }
             Mode::Normal => {
                 self.update_editor(cx, |_, editor, cx| {
@@ -1028,21 +1028,21 @@ impl Vim {
             } else if self.current_anchor.as_ref().unwrap() != &newest {
                 if let Some(tx_id) = self.current_tx.take() {
                     self.update_editor(cx, |_, editor, cx| {
-                        editor.group_until_transaction(tx_id, cx)
+                        editor.group_until_transaction(tx_id, model, cx)
                     });
                 }
             }
         } else if self.mode == Mode::Normal && newest.start != newest.end {
             if matches!(newest.goal, SelectionGoal::HorizontalRange { .. }) {
-                self.switch_mode(Mode::VisualBlock, false, cx);
+                self.switch_mode(Mode::VisualBlock, false, model, cx);
             } else {
-                self.switch_mode(Mode::Visual, false, cx)
+                self.switch_mode(Mode::Visual, false, model, cx)
             }
         } else if newest.start == newest.end
             && !is_multicursor
             && [Mode::Visual, Mode::VisualLine, Mode::VisualBlock].contains(&self.mode)
         {
-            self.switch_mode(Mode::Normal, true, cx);
+            self.switch_mode(Mode::Normal, true, model, cx);
         }
     }
 
@@ -1064,7 +1064,7 @@ impl Vim {
                     smartcase: VimSettings::get_global(cx).use_smartcase_find,
                 };
                 Vim::globals(cx).last_find = Some(find.clone());
-                self.motion(find, cx)
+                self.motion(find, model, cx)
             }
             Some(Operator::FindBackward { after }) => {
                 let find = Motion::FindBackward {
@@ -1078,28 +1078,28 @@ impl Vim {
                     smartcase: VimSettings::get_global(cx).use_smartcase_find,
                 };
                 Vim::globals(cx).last_find = Some(find.clone());
-                self.motion(find, cx)
+                self.motion(find, model, cx)
             }
             Some(Operator::Replace) => match self.mode {
-                Mode::Normal => self.normal_replace(text, cx),
+                Mode::Normal => self.normal_replace(text, model, cx),
                 Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
-                    self.visual_replace(text, cx)
+                    self.visual_replace(text, model, cx)
                 }
                 _ => self.clear_operator(cx),
             },
             Some(Operator::Digraph { first_char }) => {
                 if let Some(first_char) = first_char {
                     if let Some(second_char) = text.chars().next() {
-                        self.insert_digraph(first_char, second_char, cx);
+                        self.insert_digraph(first_char, second_char, model, cx);
                     }
                 } else {
                     let first_char = text.chars().next();
                     self.pop_operator(cx);
-                    self.push_operator(Operator::Digraph { first_char }, cx);
+                    self.push_operator(Operator::Digraph { first_char }, model, cx);
                 }
             }
             Some(Operator::Literal { prefix }) => {
-                self.handle_literal_input(prefix.unwrap_or_default(), &text, cx)
+                self.handle_literal_input(prefix.unwrap_or_default(), &text, model, cx)
             }
             Some(Operator::AddSurrounds { target }) => match self.mode {
                 Mode::Normal => {
@@ -1176,7 +1176,7 @@ impl Vim {
             editor.selections.line_mode = matches!(vim.mode, Mode::VisualLine);
             editor.set_inline_completions_enabled(matches!(vim.mode, Mode::Insert | Mode::Replace));
         });
-        cx.notify()
+        model.notify(cx)
     }
 }
 

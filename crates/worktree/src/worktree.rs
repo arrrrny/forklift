@@ -434,7 +434,7 @@ impl Worktree {
             cx.observe_global::<SettingsStore>(move |this, cx| {
                 if let Self::Local(this) = this {
                     let settings = WorktreeSettings::get(settings_location, cx).clone();
-                    if this.settings != settings {
+                    if this.settings != model, settings {
                         this.settings = settings;
                         this.restart_background_scanners(cx);
                     }
@@ -538,7 +538,7 @@ impl Worktree {
                             }
                         };
                         cx.emit(Event::UpdatedEntries(Arc::default()));
-                        cx.notify();
+                        model.notify(cx);
                         while let Some((scan_id, _)) = this.snapshot_subscriptions.front() {
                             if this.observed_snapshot(*scan_id) {
                                 let (_, tx) = this.snapshot_subscriptions.pop_front().unwrap();
@@ -597,7 +597,7 @@ impl Worktree {
         !self.is_local()
     }
 
-    pub fn settings_location(&self, _&Model<Self>, : &AppContext) -> SettingsLocation<'static> {
+    pub fn settings_location(&self, _&Model<Self>, : &AppContext) -> SettingsLocation<'staticmodel, > {
         SettingsLocation {
             worktree_id: self.id(),
             path: Path::new(EMPTY_PATH),
@@ -1179,7 +1179,7 @@ impl LocalWorktree {
                             this.restart_background_scanners(cx);
                         }
                     }
-                    cx.notify();
+                    model.notify(cx);
                 })
                 .ok();
             }
@@ -5224,7 +5224,7 @@ impl WorktreeModelHandle for Model<Worktree> {
         let file_name = "fs-event-sentinel";
 
         let tree = self.clone();
-        let (fs, root_path) = self.update(cx, |tree, _| {
+        let (fs, root_path) = self.update(cx, |tree, model, _| {
             let tree = tree.as_local().unwrap();
             (tree.fs.clone(), tree.abs_path().clone())
         });
@@ -5263,7 +5263,7 @@ impl WorktreeModelHandle for Model<Worktree> {
         let file_name = "fs-event-sentinel";
 
         let tree = self.clone();
-        let (fs, root_path, mut git_dir_scan_id) = self.update(cx, |tree, _| {
+        let (fs, root_path, mut git_dir_scan_id) = self.update(cx, |tree, model, _| {
             let tree = tree.as_local().unwrap();
             let root_entry = tree.root_git_entry().unwrap();
             let local_repo_entry = tree.get_local_repo(&root_entry).unwrap();

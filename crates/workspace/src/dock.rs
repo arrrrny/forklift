@@ -107,7 +107,7 @@ where
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) {
-        self.update(cx, |this, cx| this.set_position(position, cx))
+        self.update(cx, |this, model, cx| this.set_position(position, cx))
     }
 
     fn is_zoomed(&self, window: &Window, cx: &AppContext) -> bool {
@@ -115,11 +115,11 @@ where
     }
 
     fn set_zoomed(&self, zoomed: bool, window: &mut gpui::Window, cx: &mut gpui::AppContext) {
-        self.update(cx, |this, cx| this.set_zoomed(zoomed, cx))
+        self.update(cx, |this, model, cx| this.set_zoomed(zoomed, cx))
     }
 
     fn set_active(&self, active: bool, window: &mut gpui::Window, cx: &mut gpui::AppContext) {
-        self.update(cx, |this, cx| this.set_active(active, cx))
+        self.update(cx, |this, model, cx| this.set_active(active, cx))
     }
 
     fn pane(&self, window: &Window, cx: &AppContext) -> Option<View<Pane>> {
@@ -135,7 +135,7 @@ where
     }
 
     fn set_size(&self, size: Option<Pixels>, window: &mut gpui::Window, cx: &mut gpui::AppContext) {
-        self.update(cx, |this, cx| this.set_size(size, cx))
+        self.update(cx, |this, model, cx| this.set_size(size, cx))
     }
 
     fn icon(&self, window: &Window, cx: &AppContext) -> Option<ui::IconName> {
@@ -226,7 +226,7 @@ impl Dock {
     pub fn new(position: DockPosition, model: &Model<Workspace>, cx: &mut AppContext) -> View<Self> {
         let focus_handle = cx.focus_handle();
         let workspace = cx.view().clone();
-        let dock = cx.new_view(|model: &Model<Self>, cx: &mut AppContext| {
+        let dock = cx.new_model(|model: &Model<Self>, cx: &mut AppContext| {
             let focus_subscription = cx.on_focus(&focus_handle, |dock, cx| {
                 if let Some(active_entry) = dock.panel_entries.get(dock.active_panel_index) {
                     active_entry.panel.focus_handle(cx).focus(cx)
@@ -342,7 +342,7 @@ impl Dock {
                 active_panel.panel.set_active(open, cx);
             }
 
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -357,7 +357,7 @@ impl Dock {
             }
         }
 
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn zoom_out(&mut self, model: &Model<Self>, cx: &mut AppContext) {
@@ -375,7 +375,7 @@ impl Dock {
         model: &Model<Self>, cx: &mut AppContext,
     ) {
         let subscriptions = [
-            cx.observe(&panel, |_, _, cx| cx.notify()),
+            cx.observe(&panel, |_, _, cx| model.notify(cx)),
             cx.observe_global::<SettingsStore>({
                 let workspace = workspace.clone();
                 let panel = panel.clone();
@@ -386,7 +386,7 @@ impl Dock {
                         return;
                     }
 
-                    let Ok(new_dock) = workspace.update(cx, |workspace, cx| {
+                    let Ok(new_dock) = workspace.update(cx, |workspace, model, cx| {
                         if panel.is_zoomed(cx) {
                             workspace.zoomed_position = Some(new_position);
                         }
@@ -407,7 +407,7 @@ impl Dock {
 
                     this.remove_panel(&panel, cx);
 
-                    new_dock.update(cx, |new_dock, cx| {
+                    new_dock.update(cx, |new_dock, model, cx| {
                         new_dock.remove_panel(&panel, cx);
                         new_dock.add_panel(panel.clone(), workspace.clone(), cx);
                         if was_visible {
@@ -424,7 +424,7 @@ impl Dock {
                         cx.focus_view(&panel);
                     }
                     workspace
-                        .update(cx, |workspace, cx| {
+                        .update(cx, |workspace, model, cx| {
                             workspace.zoomed = Some(panel.downgrade().into());
                             workspace.zoomed_position = Some(panel.read(cx).position(cx));
                             cx.emit(Event::ZoomChanged);
@@ -434,13 +434,13 @@ impl Dock {
                 PanelEvent::ZoomOut => {
                     this.set_panel_zoomed(&panel.to_any(), false, cx);
                     workspace
-                        .update(cx, |workspace, cx| {
+                        .update(cx, |workspace, model, cx| {
                             if workspace.zoomed_position == Some(this.position) {
                                 workspace.zoomed = None;
                                 workspace.zoomed_position = None;
                                 cx.emit(Event::ZoomChanged);
                             }
-                            cx.notify();
+                            model.notify(cx);
                         })
                         .ok();
                 }
@@ -476,7 +476,7 @@ impl Dock {
             self.set_open(true, cx);
         }
 
-        cx.notify()
+        model.notify(cx)
     }
 
     pub fn restore_state(&mut self, model: &Model<Self>, cx: &mut AppContext) -> bool {
@@ -515,7 +515,7 @@ impl Dock {
                 std::cmp::Ordering::Greater => {}
             }
             self.panel_entries.remove(panel_ix);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -534,7 +534,7 @@ impl Dock {
                 active_panel.panel.set_active(true, cx);
             }
 
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -591,7 +591,7 @@ impl Dock {
             let size = size.map(|size| size.max(RESIZE_HANDLE_SIZE).round());
 
             entry.panel.set_size(size, cx);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -637,7 +637,7 @@ impl Render for Dock {
                     .id("resize-handle")
                     .on_drag(DraggedDock(position), |dock, _, cx| {
                         cx.stop_propagation();
-                        cx.new_view(|_| dock.clone())
+                        cx.new_model(|_| dock.clone())
                     })
                     .on_mouse_down(
                         MouseButton::Left,
@@ -726,7 +726,7 @@ impl Render for Dock {
 
 impl PanelButtons {
     pub fn new(dock: View<Dock>, model: &Model<Self>, cx: &mut AppContext) -> Self {
-        cx.observe(&dock, |_, _, cx| cx.notify()).detach();
+        cx.observe(&dock, |_, _, cx| model.notify(cx)).detach();
         Self { dock }
     }
 }
@@ -778,7 +778,7 @@ impl Render for PanelButtons {
                                 DockPosition::Bottom,
                             ];
 
-                            ContextMenu::build(cx, |mut menu, cx| {
+                            ContextMenu::build(cx, window, |mut menu, model, window, cx| {
                                 for position in POSITIONS {
                                     if position != dock_position
                                         && panel.position_is_valid(position, cx)

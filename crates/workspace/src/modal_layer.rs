@@ -32,7 +32,7 @@ impl<V: ModalView> ModalViewHandle for View<V> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) -> DismissDecision {
-        self.update(cx, |this, cx| this.on_before_dismiss(cx))
+        self.update(cx, |this, model, cx| this.on_before_dismiss(cx))
     }
 
     fn view(&self) -> AnyView {
@@ -82,7 +82,7 @@ impl ModalLayer {
                 return;
             }
         }
-        let new_modal = cx.new_view(build_view);
+        let new_modal = cx.new_model(build_view);
         self.show_modal(new_modal, cx);
     }
 
@@ -109,7 +109,7 @@ impl ModalLayer {
         cx.defer(move |_, cx| {
             cx.focus_view(&new_modal);
         });
-        cx.notify();
+        model.notify(cx);
     }
 
     fn hide_modal(&mut self, model: &Model<Self>, cx: &mut AppContext) -> bool {
@@ -137,7 +137,7 @@ impl ModalLayer {
                     previous_focus.focus(cx);
                 }
             }
-            cx.notify();
+            model.notify(cx);
         }
         true
     }

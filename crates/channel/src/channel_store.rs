@@ -23,7 +23,7 @@ pub const RECONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn init(client: &Arc<Client>, user_store: Model<UserStore>, cx: &mut AppContext) {
     let channel_store =
-        cx.new_model(|cx| ChannelStore::new(client.clone(), user_store.clone(), cx));
+        cx.new_model(|model, cx| ChannelStore::new(client.clone(), user_store.clone(), model, cx));
     cx.set_global(GlobalChannelStore(channel_store));
 }
 
@@ -317,7 +317,7 @@ impl ChannelStore {
         self.open_channel_resource(
             channel_id,
             |this| &mut this.opened_buffers,
-            |channel, cx| ChannelBuffer::new(channel, client, user_store, channel_store, cx),
+            |channel, cx| ChannelBuffer::new(channel, client, user_store, channel_store, model, model, cx),
             cx,
         )
     }
@@ -394,7 +394,7 @@ impl ChannelStore {
             .entry(channel_id)
             .or_default()
             .acknowledge_message_id(message_id);
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn update_latest_message_id(
@@ -408,7 +408,7 @@ impl ChannelStore {
             .entry(channel_id)
             .or_default()
             .update_latest_message_id(message_id);
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn acknowledge_notes_version(
@@ -423,7 +423,7 @@ impl ChannelStore {
             .entry(channel_id)
             .or_default()
             .acknowledge_notes_version(epoch, version);
-        cx.notify()
+        model.notify(cx)
     }
 
     pub fn update_latest_notes_version(
@@ -438,7 +438,7 @@ impl ChannelStore {
             .entry(channel_id)
             .or_default()
             .update_latest_notes_version(epoch, version);
-        cx.notify()
+        model.notify(cx)
     }
 
     pub fn open_channel_chat(
@@ -453,7 +453,7 @@ impl ChannelStore {
         self.open_channel_resource(
             channel_id,
             |this| &mut this.opened_chats,
-            |channel, cx| ChannelChat::new(channel, this, user_store, client, cx),
+            |channel, cx| ChannelChat::new(channel, this, user_store, client, model, model, cx),
             cx,
         )
     }
@@ -672,7 +672,7 @@ impl ChannelStore {
             return Task::ready(Err(anyhow!("invite request already in progress")));
         }
 
-        cx.notify();
+        model.notify(cx);
         let client = self.client.clone();
         cx.spawn(move |this, mut cx| async move {
             let result = client
@@ -685,7 +685,7 @@ impl ChannelStore {
 
             this.update(&mut cx, |this, cx| {
                 this.outgoing_invites.remove(&(channel_id, user_id));
-                cx.notify();
+                model.notify(cx);
             })?;
 
             result?;
@@ -705,7 +705,7 @@ impl ChannelStore {
             return Task::ready(Err(anyhow!("invite request already in progress")));
         }
 
-        cx.notify();
+        model.notify(cx);
         let client = self.client.clone();
         cx.spawn(move |this, mut cx| async move {
             let result = client
@@ -717,7 +717,7 @@ impl ChannelStore {
 
             this.update(&mut cx, |this, cx| {
                 this.outgoing_invites.remove(&(channel_id, user_id));
-                cx.notify();
+                model.notify(cx);
             })?;
             result?;
             Ok(())
@@ -736,7 +736,7 @@ impl ChannelStore {
             return Task::ready(Err(anyhow!("member request already in progress")));
         }
 
-        cx.notify();
+        model.notify(cx);
         let client = self.client.clone();
         cx.spawn(move |this, mut cx| async move {
             let result = client
@@ -749,7 +749,7 @@ impl ChannelStore {
 
             this.update(&mut cx, |this, cx| {
                 this.outgoing_invites.remove(&(channel_id, user_id));
-                cx.notify();
+                model.notify(cx);
             })?;
 
             result?;
@@ -925,7 +925,7 @@ impl ChannelStore {
         for chat in self.opened_chats.values() {
             if let OpenedModelHandle::Open(chat) = chat {
                 if let Some(chat) = chat.upgrade() {
-                    chat.update(cx, |chat, cx| {
+                    chat.update(cx, |chat, model, cx| {
                         chat.rejoin(cx);
                     });
                 }
@@ -965,7 +965,7 @@ impl ChannelStore {
                             return false;
                         };
 
-                        channel_buffer.update(cx, |channel_buffer, cx| {
+                        channel_buffer.update(cx, |channel_buffer, model, cx| {
                             let channel_id = channel_buffer.channel_id;
                             if let Some(remote_buffer) = response
                                 .buffers
@@ -983,7 +983,7 @@ impl ChannelStore {
 
                                 let operations = channel_buffer
                                     .buffer()
-                                    .update(cx, |buffer, cx| {
+                                    .update(cx, |buffer, model, cx| {
                                         let outgoing_operations =
                                             buffer.serialize_ops(Some(remote_version), cx);
                                         let incoming_operations =
@@ -1035,7 +1035,7 @@ impl ChannelStore {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) {
-        cx.notify();
+        model.notify(cx);
         self.did_subscribe = false;
         self.disconnect_channel_buffers_task.get_or_insert_with(|| {
             cx.spawn(move |this, mut cx| async move {
@@ -1048,7 +1048,7 @@ impl ChannelStore {
                         for (_, buffer) in this.opened_buffers.drain() {
                             if let OpenedModelHandle::Open(buffer) = buffer {
                                 if let Some(buffer) = buffer.upgrade() {
-                                    buffer.update(cx, |buffer, cx| buffer.disconnect(cx));
+                                    buffer.update(cx, |buffer, model, cx| buffer.disconnect(cx));
                                 }
                             }
                         }
@@ -1151,7 +1151,7 @@ impl ChannelStore {
             }
         }
 
-        cx.notify();
+        model.notify(cx);
         if payload.channel_participants.is_empty() {
             return None;
         }
@@ -1166,9 +1166,9 @@ impl ChannelStore {
             }
         }
 
-        let users = self
-            .user_store
-            .update(cx, |user_store, cx| user_store.get_users(all_user_ids, cx));
+        let users = self.user_store.update(cx, |user_store, model, cx| {
+            user_store.get_users(all_user_ids, model, cx)
+        });
         Some(cx.spawn(|this, mut cx| async move {
             let users = users.await?;
 
@@ -1191,7 +1191,7 @@ impl ChannelStore {
                         .insert(ChannelId(entry.channel_id), participants);
                 }
 
-                cx.notify();
+                model.notify(cx);
             })
         }))
     }

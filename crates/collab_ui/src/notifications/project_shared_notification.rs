@@ -29,7 +29,7 @@ pub fn init(app_state: &Arc<AppState>, cx: &mut AppContext) {
                 let options = notification_window_options(screen, window_size, cx);
                 let Some(window) = cx
                     .open_window(options, |cx| {
-                        cx.new_view(|_| {
+                        cx.new_model(|_| {
                             ProjectSharedNotification::new(
                                 owner.clone(),
                                 *project_id,
@@ -55,7 +55,7 @@ pub fn init(app_state: &Arc<AppState>, cx: &mut AppContext) {
             if let Some(windows) = notification_windows.remove(project_id) {
                 for window in windows {
                     window
-                        .update(cx, |_, cx| {
+                        .update(cx, |_, model, cx| {
                             cx.remove_window();
                         })
                         .ok();
@@ -67,7 +67,7 @@ pub fn init(app_state: &Arc<AppState>, cx: &mut AppContext) {
             for (_, windows) in notification_windows.drain() {
                 for window in windows {
                     window
-                        .update(cx, |_, cx| {
+                        .update(cx, |_, model, cx| {
                             cx.remove_window();
                         })
                         .ok();
@@ -112,7 +112,7 @@ impl ProjectSharedNotification {
         if let Some(active_room) =
             ActiveCall::global(cx).read_with(cx, |call, _| call.room().cloned())
         {
-            active_room.update(cx, |_, cx| {
+            active_room.update(cx, |_, model, cx| {
                 cx.emit(room::Event::RemoteProjectInvitationDiscarded {
                     project_id: self.project_id,
                 });

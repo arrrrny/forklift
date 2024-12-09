@@ -110,8 +110,13 @@ impl ContextStore {
             let this = cx.new_model(|model: &Model<Self>, cx: &mut AppContext| {
                 let context_server_factory_registry =
                     ContextServerFactoryRegistry::default_global(cx);
-                let context_server_manager = cx.new_model(|cx| {
-                    ContextServerManager::new(context_server_factory_registry, project.clone(), cx)
+                let context_server_manager = cx.new_model(|model, cx| {
+                    ContextServerManager::new(
+                        context_server_factory_registry,
+                        project.clone(),
+                        model,
+                        cx,
+                    )
                 });
                 let mut this = Self {
                     contexts: Vec::new(),
@@ -146,7 +151,7 @@ impl ContextStore {
                     project: project.clone(),
                     prompt_builder,
                 };
-                this.handle_project_changed(project.clone(), cx);
+                this.handle_project_changed(project.clone(), model, cx);
                 this.synchronize_contexts(cx);
                 this.register_context_server_handlers(cx);
                 this
@@ -174,7 +179,7 @@ impl ContextStore {
                     summary: context.summary,
                 })
                 .collect();
-            cx.notify();
+            model.notify(cx);
         })
     }
 
@@ -246,7 +251,7 @@ impl ContextStore {
             if let Some(context) = this.loaded_context_for_id(&context_id, cx) {
                 let operation_proto = envelope.payload.operation.context("invalid operation")?;
                 let operation = ContextOperation::from_proto(operation_proto)?;
-                context.update(cx, |context, cx| context.apply_ops([operation], cx));
+                context.update(cx, |context, model, cx| context.apply_ops([operation], cx));
             }
             Ok(())
         })?
@@ -347,9 +352,9 @@ impl ContextStore {
                 self.contexts.retain_mut(|context| {
                     if let Some(strong_context) = context.upgrade() {
                         *context = ContextHandle::Weak(context.downgrade());
-                        strong_context.update(cx, |context, cx| {
+                        strong_context.update(cx, |context, model, cx| {
                             if context.replica_id() != ReplicaId::default() {
-                                context.set_capability(language::Capability::ReadOnly, cx);
+                                context.set_capability(language::Capability::ReadOnly, model, cx);
                             }
                         });
                         true
@@ -358,14 +363,14 @@ impl ContextStore {
                     }
                 });
                 self.host_contexts.clear();
-                cx.notify();
+                model.notify(cx);
             }
             _ => {}
         }
     }
 
     pub fn create(&mut self, model: &Model<Self>, cx: &mut AppContext) -> Model<Context> {
-        let context = cx.new_model(|cx| {
+        let context = cx.new_model(|model, cx| {
             Context::local(
                 self.languages.clone(),
                 Some(self.project.clone()),
@@ -376,7 +381,7 @@ impl ContextStore {
                 cx,
             )
         });
-        self.register_context(&context, cx);
+        self.register_context(&context, model, cx);
         context
     }
 
@@ -403,7 +408,7 @@ impl ContextStore {
             let response = request.await?;
             let context_id = ContextId::from_proto(response.context_id);
             let context_proto = response.context.context("invalid context")?;
-            let context = cx.new_model(|cx| {
+            let context = cx.new_model(|model, cx| {
                 Context::new(
                     context_id.clone(),
                     replica_id,
@@ -414,6 +419,7 @@ impl ContextStore {
                     tools,
                     Some(project),
                     Some(telemetry),
+                    model,
                     cx,
                 )
             })?;
@@ -467,7 +473,7 @@ impl ContextStore {
 
         cx.spawn(|this, mut cx| async move {
             let saved_context = load.await?;
-            let context = cx.new_model(|cx| {
+            let context = cx.new_model(|model, cx| {
                 Context::deserialize(
                     saved_context,
                     path.clone(),
@@ -477,6 +483,7 @@ impl ContextStore {
                     tools,
                     Some(project),
                     Some(telemetry),
+                    model,
                     cx,
                 )
             })?;
@@ -547,7 +554,7 @@ impl ContextStore {
         cx.spawn(|this, mut cx| async move {
             let response = request.await?;
             let context_proto = response.context.context("invalid context")?;
-            let context = cx.new_model(|cx| {
+            let context = cx.new_model(|model, cx| {
                 Context::new(
                     context_id.clone(),
                     replica_id,
@@ -558,6 +565,7 @@ impl ContextStore {
                     tools,
                     Some(project),
                     Some(telemetry),
+                    model,
                     cx,
                 )
             })?;
@@ -793,7 +801,7 @@ impl ContextStore {
 
             this.update(&mut cx, |this, cx| {
                 this.contexts_metadata = contexts;
-                cx.notify();
+                model.notify(cx);
             })
         })
     }

@@ -282,7 +282,7 @@ impl TaskStore {
             .map(|json| json.trim())
             .filter(|json| !json.is_empty());
 
-        task_inventory.update(cx, |inventory, _| {
+        task_inventory.update(cx, |inventory, model, _| {
             inventory.update_file_based_tasks(location, raw_tasks_json)
         })
     }

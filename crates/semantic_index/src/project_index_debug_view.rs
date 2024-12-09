@@ -73,7 +73,7 @@ impl ProjectIndexDebugView {
 
             this.update(&mut cx, |this, cx| {
                 this.rows = rows;
-                cx.notify();
+                model.notify(cx);
             })
         })
         .detach();
@@ -83,7 +83,8 @@ impl ProjectIndexDebugView {
         &mut self,
         worktree_id: WorktreeId,
         file_path: Arc<Path>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Option<()> {
         let project_index = self.index.read(cx);
         let fs = project_index.fs().clone();
@@ -121,7 +122,7 @@ impl ProjectIndexDebugView {
                         px(100.),
                         move |ix, cx| {
                             if let Some(view) = view.upgrade() {
-                                view.update(cx, |view, cx| view.render_chunk(ix, cx))
+                                view.update(cx, |view, model, cx| view.render_chunk(ix, cx))
                             } else {
                                 div().into_any()
                             }
@@ -129,7 +130,7 @@ impl ProjectIndexDebugView {
                     ),
                     chunks,
                 });
-                cx.notify();
+                model.notify(cx);
             })
         })
         .detach();
@@ -213,7 +214,7 @@ impl Render for ProjectIndexDebugView {
                         .cursor(CursorStyle::PointingHand)
                         .on_click(cx.listener(|this, _, cx| {
                             this.selected_path.take();
-                            cx.notify();
+                            model.notify(cx);
                         })),
                 )
                 .child(list(selected_path.list_state.clone()).size_full())
@@ -239,7 +240,7 @@ impl Render for ProjectIndexDebugView {
                                 .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, cx| {
                                     if this.hovered_row_ix != Some(ix) {
                                         this.hovered_row_ix = Some(ix);
-                                        cx.notify();
+                                        model.notify(cx);
                                     }
                                 }))
                                 .cursor(CursorStyle::PointingHand)
@@ -261,7 +262,7 @@ impl Render for ProjectIndexDebugView {
 
             canvas(
                 move |bounds, cx| {
-                    list.prepaint_as_root(bounds.origin, bounds.size.into(), cx);
+                    list.prepaint_as_root(bounds.origin, bounds.size.into(), model, cx);
                     list
                 },
                 |_, mut list, cx| {
@@ -286,12 +287,13 @@ impl Item for ProjectIndexDebugView {
     fn clone_on_split(
         &self,
         _: Option<workspace::WorkspaceId>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Option<View<Self>>
     where
         Self: Sized,
     {
-        Some(cx.new_view(|cx| Self::new(self.index.clone(), cx)))
+        Some(cx.new_model(|model, cx| Self::new(self.index.clone(), model, cx)))
     }
 }
 

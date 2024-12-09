@@ -51,11 +51,11 @@ pub fn schedule_resolved_task(
     if let Some(spawn_in_terminal) = resolved_task.resolved.take() {
         if !omit_history {
             resolved_task.resolved = Some(spawn_in_terminal.clone());
-            workspace.project().update(cx, |project, cx| {
+            workspace.project().update(cx, |project, model, cx| {
                 if let Some(task_inventory) =
                     project.task_store().read(cx).task_inventory().cloned()
                 {
-                    task_inventory.update(cx, |inventory, _| {
+                    task_inventory.update(cx, |inventory, model, _| {
                         inventory.task_scheduled(task_source_kind, resolved_task);
                     })
                 }

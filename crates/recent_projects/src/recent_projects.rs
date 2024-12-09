@@ -48,7 +48,7 @@ impl ModalView for RecentProjects {}
 
 impl RecentProjects {
     fn new(delegate: RecentProjectsDelegate, rem_width: f32, model: &Model<Self>, cx: &mut AppContext) -> Self {
-        let picker = cx.new_view(|cx| {
+        let picker = cx.new_model(|model, cx| {
             // We want to use a list when we render paths, because the items can have different heights (multiple paths).
             if delegate.render_paths {
                 Picker::list(delegate, cx)
@@ -66,7 +66,7 @@ impl RecentProjects {
                 .log_err()
                 .unwrap_or_default();
             this.update(&mut cx, move |this, cx| {
-                this.picker.update(cx, move |picker, cx| {
+                this.picker.update(cx, move |picker, model, cx| {
                     picker.delegate.set_workspaces(workspaces);
                     picker.update_matches(picker.query(cx), cx)
                 })
@@ -88,10 +88,10 @@ impl RecentProjects {
                 return;
             };
 
-            recent_projects.update(cx, |recent_projects, cx| {
+            recent_projects.update(cx, |recent_projects, model, cx| {
                 recent_projects
                     .picker
-                    .update(cx, |picker, cx| picker.cycle_selection(cx))
+                    .update(cx, |picker, model, cx| picker.cycle_selection(cx))
             });
         });
     }
@@ -124,7 +124,7 @@ impl Render for RecentProjects {
             .w(rems(self.rem_width))
             .child(self.picker.clone())
             .on_mouse_down_out(cx.listener(|this, _, cx| {
-                this.picker.update(cx, |this, cx| {
+                this.picker.update(cx, |this, model, cx| {
                     this.cancel(&Default::default(), cx);
                 })
             }))
@@ -269,7 +269,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                 !secondary
             };
             workspace
-                .update(cx, |workspace, cx| {
+                .update(cx, |workspace, model, cx| {
                     if workspace.database_id() == Some(*candidate_workspace_id) {
                         Task::ready(Ok(()))
                     } else {
@@ -449,7 +449,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                 })
                 .tooltip(move |cx| {
                     let tooltip_highlighted_location = highlighted_match.clone();
-                    cx.new_view(move |_| MatchTooltip {
+                    cx.new_model(move |_| MatchTooltip {
                         highlighted_location: tooltip_highlighted_location,
                     })
                     .into()
@@ -627,7 +627,7 @@ mod tests {
 
         let workspace = cx.update(|cx| cx.windows()[0].downcast::<Workspace>().unwrap());
         workspace
-            .update(cx, |workspace, _| assert!(!workspace.is_edited()))
+            .update(cx, |workspace, model, _| assert!(!workspace.is_edited()))
             .unwrap();
 
         let editor = workspace
@@ -640,18 +640,18 @@ mod tests {
             })
             .unwrap();
         workspace
-            .update(cx, |_, cx| {
-                editor.update(cx, |editor, cx| editor.insert("EDIT", cx));
+            .update(cx, |_, model, cx| {
+                editor.update(cx, |editor, model, cx| editor.insert("EDIT", cx));
             })
             .unwrap();
         workspace
-            .update(cx, |workspace, _| assert!(workspace.is_edited(), "After inserting more text into the editor without saving, we should have a dirty project"))
+            .update(cx, |workspace, model, _| assert!(workspace.is_edited(), "After inserting more text into the editor without saving, we should have a dirty project"))
             .unwrap();
 
         let recent_projects_picker = open_recent_projects(&workspace, cx);
         workspace
-            .update(cx, |_, cx| {
-                recent_projects_picker.update(cx, |picker, cx| {
+            .update(cx, |_, model, cx| {
+                recent_projects_picker.update(cx, |picker, model, cx| {
                     assert_eq!(picker.query(cx), "");
                     let delegate = &mut picker.delegate;
                     delegate.matches = vec![StringMatch {
@@ -674,7 +674,7 @@ mod tests {
         );
         cx.dispatch_action(*workspace, menu::Confirm);
         workspace
-            .update(cx, |workspace, cx| {
+            .update(cx, |workspace, model, cx| {
                 assert!(
                     workspace.active_modal::<RecentProjects>(cx).is_none(),
                     "Should remove the modal after selecting new recent project"
@@ -692,7 +692,7 @@ mod tests {
             "Should have no pending prompt after cancelling"
         );
         workspace
-            .update(cx, |workspace, _| {
+            .update(cx, |workspace, model, _| {
                 assert!(
                     workspace.is_edited(),
                     "Should be in the same dirty project after cancelling"
@@ -712,7 +712,7 @@ mod tests {
             },
         );
         workspace
-            .update(cx, |workspace, cx| {
+            .update(cx, |workspace, model, cx| {
                 workspace
                     .active_modal::<RecentProjects>(cx)
                     .unwrap()

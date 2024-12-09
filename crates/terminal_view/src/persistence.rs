@@ -99,7 +99,7 @@ pub(crate) fn deserialize_terminal_panel(
 ) -> Task<anyhow::Result<View<TerminalPanel>>> {
     cx.spawn(move |mut cx| async move {
         let terminal_panel = workspace.update(&mut cx, |workspace, cx| {
-            cx.new_view(|cx| {
+            cx.new_model(|model, cx| {
                 let mut panel = TerminalPanel::new(workspace, cx);
                 panel.height = serialized_panel.height.map(|h| h.round());
                 panel.width = serialized_panel.width.map(|w| w.round());
@@ -113,12 +113,13 @@ pub(crate) fn deserialize_terminal_panel(
                     project,
                     workspace,
                     item_ids.as_slice(),
+                    model,
                     &mut cx,
                 )
                 .await;
                 let active_item = serialized_panel.active_item_id;
                 terminal_panel.update(&mut cx, |terminal_panel, cx| {
-                    terminal_panel.active_pane.update(cx, |pane, cx| {
+                    terminal_panel.active_pane.update(cx, |pane, model, cx| {
                         populate_pane_items(pane, items, active_item, cx);
                     });
                 })?;
@@ -130,6 +131,7 @@ pub(crate) fn deserialize_terminal_panel(
                     terminal_panel.clone(),
                     database_id,
                     serialized_pane_group,
+                    model,
                     &mut cx,
                 )
                 .await;
@@ -224,7 +226,7 @@ async fn deserialize_pane_group(
             .await;
 
             let pane = panel
-                .update(cx, |terminal_panel, cx| {
+                .update(cx, |terminal_panel, model, cx| {
                     new_terminal_pane(
                         workspace.clone(),
                         project.clone(),
@@ -236,20 +238,23 @@ async fn deserialize_pane_group(
             let active_item = serialized_pane.active_item;
 
             let terminal = pane
-                .update(cx, |pane, cx| {
+                .update(cx, |pane, model, cx| {
                     populate_pane_items(pane, new_items, active_item, cx);
                     // Avoid blank panes in splits
                     if pane.items_len() == 0 {
                         let working_directory = workspace
-                            .update(cx, |workspace, cx| default_working_directory(workspace, cx))
+                            .update(cx, |workspace, model, cx| {
+                                default_working_directory(workspace, cx)
+                            })
                             .ok()
                             .flatten();
                         let kind = TerminalKind::Shell(
                             working_directory.as_deref().map(Path::to_path_buf),
                         );
                         let window = cx.window_handle();
-                        let terminal = project
-                            .update(cx, |project, cx| project.create_terminal(kind, window, cx));
+                        let terminal = project.update(cx, |project, model, cx| {
+                            project.create_terminal(kind, window, cx)
+                        });
                         Some(Some(terminal))
                     } else {
                         Some(None)
@@ -259,8 +264,8 @@ async fn deserialize_pane_group(
                 .flatten()?;
             if let Some(terminal) = terminal {
                 let terminal = terminal.await.ok()?;
-                pane.update(cx, |pane, cx| {
-                    let terminal_view = Box::new(cx.new_view(|cx| {
+                pane.update(cx, |pane, model, cx| {
+                    let terminal_view = Box::new(cx.new_model(|model, cx| {
                         TerminalView::new(terminal, workspace.clone(), Some(workspace_id), cx)
                     }));
                     pane.add_item(terminal_view, true, false, None, cx);
@@ -290,6 +295,7 @@ async fn deserialize_terminal_views(
                     workspace.clone(),
                     workspace_id,
                     *item_id,
+                    model,
                     cx,
                 )
             })

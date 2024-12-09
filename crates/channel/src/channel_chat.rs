@@ -117,7 +117,7 @@ impl ChannelChat {
             })
             .await?;
 
-        let handle = cx.new_model(|cx| {
+        let handle = cx.new_model(|model, cx| {
             cx.on_release(Self::release).detach();
             Self {
                 channel_id: channel.id,
@@ -169,7 +169,8 @@ impl ChannelChat {
     pub fn send_message(
         &mut self,
         message: MessageParams,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Result<Task<Result<u64>>> {
         if message.text.trim().is_empty() {
             Err(anyhow!("message body can't be empty"))?;
@@ -229,7 +230,12 @@ impl ChannelChat {
         }))
     }
 
-    pub fn remove_message(&mut self, id: u64, model: &Model<Self>, cx: &mut AppContext) -> Task<Result<()>> {
+    pub fn remove_message(
+        &mut self,
+        id: u64,
+        model: &Model<Self>,
+        cx: &mut AppContext,
+    ) -> Task<Result<()>> {
         let response = self.rpc.request(proto::RemoveChannelMessage {
             channel_id: self.channel_id.0,
             message_id: id,
@@ -247,7 +253,8 @@ impl ChannelChat {
         &mut self,
         id: u64,
         message: MessageParams,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Result<Task<Result<()>>> {
         self.message_update(
             ChannelMessageId::Saved(id),
@@ -272,7 +279,11 @@ impl ChannelChat {
         }))
     }
 
-    pub fn load_more_messages(&mut self, model: &Model<Self>, cx: &mut AppContext) -> Option<Task<Option<()>>> {
+    pub fn load_more_messages(
+        &mut self,
+        model: &Model<Self>,
+        cx: &mut AppContext,
+    ) -> Option<Task<Option<()>>> {
         if self.loaded_all_messages {
             return None;
         }
@@ -368,7 +379,7 @@ impl ChannelChat {
                     })
                     .ok();
                 self.last_acknowledged_id = Some(latest_message_id);
-                self.channel_store.update(cx, |store, cx| {
+                self.channel_store.update(cx, |store, model, cx| {
                     store.acknowledge_message_id(self.channel_id, latest_message_id, cx);
                 });
             }
@@ -386,7 +397,7 @@ impl ChannelChat {
         let loaded_messages = messages_from_proto(proto_messages, &user_store, cx).await?;
 
         let first_loaded_message_id = loaded_messages.first().map(|m| m.id);
-        let loaded_message_ids = this.update(cx, |this, _| {
+        let loaded_message_ids = this.update(cx, |this, model, _| {
             let mut loaded_message_ids: HashSet<u64> = HashSet::default();
             for message in loaded_messages.iter() {
                 if let Some(saved_message_id) = message.id.into() {
@@ -423,7 +434,7 @@ impl ChannelChat {
                 .await?;
             Some(messages_from_proto(response.messages, &user_store, cx).await?)
         };
-        this.update(cx, |this, cx| {
+        this.update(cx, |this, model, cx| {
             this.first_loaded_message_id = first_loaded_message_id.and_then(|msg_id| msg_id.into());
             this.loaded_all_messages = loaded_all_messages;
             this.insert_messages(loaded_messages, cx);
@@ -584,7 +595,12 @@ impl ChannelChat {
         Ok(())
     }
 
-    fn insert_messages(&mut self, messages: SumTree<ChannelMessage>, model: &Model<Self>, cx: &mut AppContext) {
+    fn insert_messages(
+        &mut self,
+        messages: SumTree<ChannelMessage>,
+        model: &Model<Self>,
+        cx: &mut AppContext,
+    ) {
         if let Some((first_message, last_message)) = messages.first().zip(messages.last()) {
             let nonces = messages
                 .cursor::<()>(&())
@@ -639,7 +655,7 @@ impl ChannelChat {
                 new_count,
             });
 
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -656,7 +672,7 @@ impl ChannelChat {
 
                 // If the message that was deleted was the last acknowledged message,
                 // replace the acknowledged message with an earlier one.
-                self.channel_store.update(cx, |store, _| {
+                self.channel_store.update(cx, |store, model, _| {
                     let summary = self.messages.summary();
                     if summary.count == 0 {
                         store.set_acknowledged_message_id(self.channel_id, None);
@@ -681,7 +697,8 @@ impl ChannelChat {
         body: String,
         mentions: Vec<(Range<usize>, u64)>,
         edited_at: Option<OffsetDateTime>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) {
         let mut cursor = self.messages.cursor::<ChannelMessageId>(&());
         let mut messages = cursor.slice(&id, Bias::Left, &());
@@ -704,7 +721,7 @@ impl ChannelChat {
             message_id: id,
         });
 
-        cx.notify();
+        model.notify(cx);
     }
 }
 
@@ -726,7 +743,7 @@ impl ChannelMessage {
         cx: &mut AsyncAppContext,
     ) -> Result<Self> {
         let sender = user_store
-            .update(cx, |user_store, cx| {
+            .update(cx, |user_store, model, cx| {
                 user_store.get_user(message.sender_id, cx)
             })?
             .await?;
@@ -777,7 +794,7 @@ impl ChannelMessage {
             .into_iter()
             .collect();
         user_store
-            .update(cx, |user_store, cx| {
+            .update(cx, |user_store, model, cx| {
                 user_store.get_users(unique_user_ids, cx)
             })?
             .await?;

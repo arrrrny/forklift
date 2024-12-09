@@ -81,22 +81,22 @@ impl ChatPanel {
         let user_store = workspace.app_state().user_store.clone();
         let languages = workspace.app_state().languages.clone();
 
-        let input_editor = cx.new_view(|cx| {
+        let input_editor = cx.new_model(|model, cx| {
             MessageEditor::new(
                 languages.clone(),
                 user_store.clone(),
                 None,
-                cx.new_view(|cx| Editor::auto_height(4, cx)),
+                cx.new_model(|model, cx| Editor::auto_height(4, model, model, cx)),
                 cx,
             )
         });
 
-        cx.new_view(|model: &Model<Self>, cx: &mut AppContext| {
+        cx.new_model(|model: &Model<Self>, cx: &mut AppContext| {
             let view = cx.view().downgrade();
             let message_list =
                 ListState::new(0, gpui::ListAlignment::Bottom, px(1000.), move |ix, cx| {
                     if let Some(view) = view.upgrade() {
-                        view.update(cx, |view, cx| {
+                        view.update(cx, |view, model, cx| {
                             view.render_message(ix, cx).into_any_element()
                         })
                     } else {
@@ -138,7 +138,7 @@ impl ChatPanel {
                 .room()
                 .and_then(|room| room.read(cx).channel_id())
             {
-                this.select_channel(channel_id, None, cx)
+                this.select_channel(channel_id, None, model, cx)
                     .detach_and_log_err(cx);
             }
 
@@ -147,7 +147,7 @@ impl ChatPanel {
                 move |this: &mut Self, call, event: &room::Event, cx| match event {
                     room::Event::RoomJoined { channel_id } => {
                         if let Some(channel_id) = channel_id {
-                            this.select_channel(*channel_id, None, cx)
+                            this.select_channel(*channel_id, None, model, cx)
                                 .detach_and_log_err(cx);
 
                             if call
@@ -205,11 +205,11 @@ impl ChatPanel {
             };
 
             workspace.update(&mut cx, |workspace, cx| {
-                let panel = Self::new(workspace, cx);
+                let panel = Self::new(workspace, model, cx);
                 if let Some(serialized_panel) = serialized_panel {
-                    panel.update(cx, |panel, cx| {
+                    panel.update(cx, |panel, model, cx| {
                         panel.width = serialized_panel.width.map(|r| r.round());
-                        cx.notify();
+                        model.notify(cx);
                     });
                 }
                 panel
@@ -237,14 +237,14 @@ impl ChatPanel {
         if self.active_chat.as_ref().map(|e| &e.0) != Some(&chat) {
             self.markdown_data.clear();
             self.message_list.reset(chat.read(cx).message_count());
-            self.message_editor.update(cx, |editor, cx| {
+            self.message_editor.update(cx, |editor, model, cx| {
                 editor.set_channel_chat(chat.clone(), cx);
                 editor.clear_reply_to_message_id();
             });
             let subscription = cx.subscribe(&chat, Self::channel_did_change);
             self.active_chat = Some((chat, subscription));
             self.acknowledge_last_message(cx);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -276,13 +276,13 @@ impl ChatPanel {
                 message_id,
             } => {
                 if !self.active {
-                    self.channel_store.update(cx, |store, cx| {
-                        store.update_latest_message_id(*channel_id, *message_id, cx)
+                    self.channel_store.update(cx, |store, model, cx| {
+                        store.update_latest_message_id(*channel_id, *message_id, model, cx)
                     })
                 }
             }
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     fn acknowledge_last_message(&mut self, model: &Model<Self>, cx: &mut AppContext) {
@@ -295,7 +295,7 @@ impl ChatPanel {
                         .last_acknowledge_message_id(channel_id);
                 }
 
-                chat.update(cx, |chat, cx| {
+                chat.update(cx, |chat, model, cx| {
                     chat.acknowledge_last_message(cx);
                 });
             }
@@ -384,7 +384,7 @@ impl ChatPanel {
     fn render_message(&mut self, ix: usize, model: &Model<Self>, cx: &mut AppContext) -> impl IntoElement {
         let active_chat = &self.active_chat.as_ref().unwrap().0;
         let (message, is_continuation_from_previous, is_admin) =
-            active_chat.update(cx, |active_chat, cx| {
+            active_chat.update(cx, |active_chat, model, cx| {
                 let is_admin = self
                     .channel_store
                     .read(cx)
@@ -482,7 +482,7 @@ impl ChatPanel {
                         el.child(self.render_replied_to_message(
                             Some(message.id),
                             &reply_to_message,
-                            cx,
+                            model, cx,
                         ))
                         .when(is_continuation_from_previous, |this| this.mt_2())
                     })
@@ -492,8 +492,8 @@ impl ChatPanel {
                             this.child(
                                 h_flex()
                                     .gap_2()
-                                    .text_ui_sm(cx)
-                                    .child(
+                                    .text_ui_smmodel, (cx)
+                                    .model, child(
                                         Avatar::new(message.sender.avatar_uri.clone())
                                             .size(rems(1.)),
                                     )
@@ -530,8 +530,8 @@ impl ChatPanel {
                             v_flex()
                                 .w_full()
                                 .text_ui_sm(cx)
-                                .id(element_id)
-                                .child(text.element("body".into(), cx)),
+                                .id(model, element_id)
+                                .child(text.element("body".into(), model, model, cx)),
                         )
                         .when(self.has_open_menu(message_id), |el| {
                             el.bg(cx.theme().colors().element_selected)
@@ -610,7 +610,7 @@ impl ChatPanel {
                                     .on_click(cx.listener(move |this, _, cx| {
                                         this.cancel_edit_message(cx);
 
-                                        this.message_editor.update(cx, |editor, cx| {
+                                        this.message_editor.update(cx, |editor, model, cx| {
                                             editor.set_reply_to_message_id(message_id);
                                             editor.focus_handle(cx).focus(cx);
                                         })
@@ -630,7 +630,7 @@ impl ChatPanel {
                                 .child(
                                     IconButton::new(("edit", message_id), IconName::Pencil)
                                         .on_click(cx.listener(move |this, _, cx| {
-                                            this.message_editor.update(cx, |editor, cx| {
+                                            this.message_editor.update(cx, |editor, model, cx| {
                                                 editor.clear_reply_to_message_id();
 
                                                 let message = this
@@ -651,7 +651,7 @@ impl ChatPanel {
                                                         .as_singleton()
                                                         .expect("message editor must be singleton");
 
-                                                    buffer.update(cx, |buffer, cx| {
+                                                    buffer.update(cx, |buffer, model, cx| {
                                                         buffer.set_text(message.body.clone(), cx)
                                                     });
 
@@ -725,7 +725,7 @@ impl ChatPanel {
                 })
             })
         };
-        this.update(cx, |this, cx| {
+        this.update(cx, |this, model, cx| {
             let subscription = cx.subscribe(&menu, |this: &mut Self, _, _: &DismissEvent, _| {
                 this.open_context_menu = None;
             });
@@ -791,21 +791,21 @@ impl ChatPanel {
         if let Some((chat, _)) = self.active_chat.as_ref() {
             let message = self
                 .message_editor
-                .update(cx, |editor, cx| editor.take_message(cx));
+                .update(cx, |editor, model, cx| editor.take_message(cx));
 
             if let Some(id) = self.message_editor.read(cx).edit_message_id() {
-                self.message_editor.update(cx, |editor, _| {
+                self.message_editor.update(cx, |editor, model, _| {
                     editor.clear_edit_message_id();
                 });
 
                 if let Some(task) = chat
-                    .update(cx, |chat, cx| chat.update_message(id, message, cx))
+                    .update(cx, |chat, model, cx| chat.update_message(id, message, model, cx))
                     .log_err()
                 {
                     task.detach();
                 }
             } else if let Some(task) = chat
-                .update(cx, |chat, cx| chat.send_message(message, cx))
+                .update(cx, |chat, model, cx| chat.send_message(message, model, cx))
                 .log_err()
             {
                 task.detach();
@@ -815,13 +815,13 @@ impl ChatPanel {
 
     fn remove_message(&mut self, id: u64, model: &Model<Self>, cx: &mut AppContext) {
         if let Some((chat, _)) = self.active_chat.as_ref() {
-            chat.update(cx, |chat, cx| chat.remove_message(id, cx).detach())
+            chat.update(cx, |chat, model, cx| chat.remove_message(id, model, cx).detach())
         }
     }
 
     fn load_more_messages(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         if let Some((chat, _)) = self.active_chat.as_ref() {
-            chat.update(cx, |channel, cx| {
+            chat.update(cx, |channel, model, cx| {
                 if let Some(task) = channel.load_more_messages(cx) {
                     task.detach();
                 }
@@ -843,8 +843,8 @@ impl ChatPanel {
                     .then(|| Task::ready(anyhow::Ok(chat.clone())))
             })
             .unwrap_or_else(|| {
-                self.channel_store.update(cx, |store, cx| {
-                    store.open_channel_chat(selected_channel_id, cx)
+                self.channel_store.update(cx, |store, model, cx| {
+                    store.open_channel_chat(selected_channel_id, model, cx)
                 })
             });
 
@@ -869,7 +869,7 @@ impl ChatPanel {
                                     cx.background_executor().timer(Duration::from_secs(2)).await;
                                     this.update(&mut cx, |this, cx| {
                                         this.highlighted_message.take();
-                                        cx.notify();
+                                        model.notify(cx);
                                     })
                                     .ok();
                                 }
@@ -883,7 +883,7 @@ impl ChatPanel {
                                 item_ix,
                                 offset_in_item: px(0.0),
                             });
-                            cx.notify();
+                            model.notify(cx);
                         }
                     })?;
                 }
@@ -895,11 +895,11 @@ impl ChatPanel {
 
     fn close_reply_preview(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         self.message_editor
-            .update(cx, |editor, _| editor.clear_reply_to_message_id());
+            .update(cx, |editor, model, _| editor.clear_reply_to_message_id());
     }
 
     fn cancel_edit_message(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        self.message_editor.update(cx, |editor, cx| {
+        self.message_editor.update(cx, |editor, model, cx| {
             // only clear the editor input if we were editing a message
             if editor.edit_message_id().is_none() {
                 return;
@@ -915,7 +915,7 @@ impl ChatPanel {
                 .as_singleton()
                 .expect("message editor must be singleton");
 
-            buffer.update(cx, |buffer, cx| buffer.set_text("", cx));
+            buffer.update(cx, |buffer, model, cx| buffer.set_text("", cx));
         });
     }
 }
@@ -1122,7 +1122,7 @@ impl Panel for ChatPanel {
     fn set_size(&mut self, size: Option<Pixels>, model: &Model<Self>, cx: &mut AppContext) {
         self.width = size;
         self.serialize(cx);
-        cx.notify();
+        model.notify(cx);
     }
 
     fn set_active(&mut self, active: bool, model: &Model<Self>, cx: &mut AppContext) {

@@ -131,7 +131,7 @@ impl InlineCompletionProvider for SupermavenCompletionProvider {
         debounce: bool,
         model: &Model<Self>, cx: &mut AppContext,
     ) {
-        let Some(mut completion) = self.supermaven.update(cx, |supermaven, cx| {
+        let Some(mut completion) = self.supermaven.update(cx, |supermaven, model, cx| {
             supermaven.complete(&buffer_handle, cursor_position, cx)
         }) else {
             return;
@@ -154,7 +154,7 @@ impl InlineCompletionProvider for SupermavenCompletionProvider {
                                 .to_string(),
                         )
                     });
-                    cx.notify();
+                    model.notify(cx);
                 })?;
             }
             Ok(())

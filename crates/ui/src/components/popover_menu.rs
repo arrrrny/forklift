@@ -44,7 +44,7 @@ impl<M: FocusableView + EventEmitter<DismissEvent>> PopoverMenuHandle<M> {
     pub fn hide(&self, window: &mut Window, cx: &mut AppContext) {
         if let Some(state) = self.0.borrow().as_ref() {
             if let Some(menu) = state.menu.borrow().as_ref() {
-                menu.update(cx, |_, cx| cx.emit(DismissEvent));
+                menu.update(cx, |_, model, cx| cx.emit(DismissEvent));
             }
         }
     }
@@ -198,7 +198,7 @@ fn show_menu<M: FocusableView + EventEmitter<DismissEvent>>(
     let window = window.handle();
     cx.subscribe(&new_menu, move |modal, _: &DismissEvent, cx| {
         window
-            .update(cx, |window, cx| {
+            .update(cx, |window, model, cx| {
                 if modal.focus_handle(cx).contains_focused(window) {
                     if let Some(previous_focus_handle) = previous_focus_handle.as_ref() {
                         window.focus(previous_focus_handle);
@@ -377,7 +377,7 @@ impl<M: FocusableView + EventEmitter<DismissEvent> + Render> Element for Popover
                 window.on_mouse_event(move |_: &MouseDownEvent, phase, window, cx| {
                     if phase == DispatchPhase::Bubble && child_hitbox.is_hovered(window) {
                         if let Some(menu) = menu_handle.borrow().as_ref() {
-                            menu.update(cx, |_, cx| {
+                            menu.update(cx, |_, model, cx| {
                                 cx.emit(DismissEvent);
                             });
                         }

@@ -193,7 +193,7 @@ pub struct CopilotChat {
 }
 
 pub fn init(fs: Arc<dyn Fs>, client: Arc<dyn HttpClient>, cx: &mut AppContext) {
-    let copilot_chat = cx.new_model(|cx| CopilotChat::new(fs, client, cx));
+    let copilot_chat = cx.new_model(|model, cx| CopilotChat::new(fs, client, cx));
     cx.set_global(GlobalCopilotChat(copilot_chat));
 }
 
@@ -245,9 +245,9 @@ impl CopilotChat {
 
                 cx.update(|cx| {
                     if let Some(this) = Self::global(cx).as_ref() {
-                        this.update(cx, |this, cx| {
+                        this.update(cx, |this, model, cx| {
                             this.oauth_token = oauth_token;
-                            cx.notify();
+                            model.notify(cx);
                         });
                     }
                 })?;
@@ -291,7 +291,7 @@ impl CopilotChat {
                 let token = request_api_token(&oauth_token, client.clone()).await?;
                 this.update(&mut cx, |this, cx| {
                     this.api_token = Some(token.clone());
-                    cx.notify();
+                    model.notify(cx);
                 })?;
                 token
             }

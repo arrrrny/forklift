@@ -11,7 +11,8 @@ use time::OffsetDateTime;
 use util::ResultExt;
 
 pub fn init(client: Arc<Client>, user_store: Model<UserStore>, cx: &mut AppContext) {
-    let notification_store = cx.new_model(|cx| NotificationStore::new(client, user_store, cx));
+    let notification_store =
+        cx.new_model(|model, cx| NotificationStore::new(client, user_store, model, cx));
     cx.set_global(GlobalNotificationStore(notification_store));
 }
 
@@ -198,12 +199,12 @@ impl NotificationStore {
     ) -> Option<Task<Result<()>>> {
         self.notifications = Default::default();
         self.channel_messages = Default::default();
-        cx.notify();
-        self.load_more_notifications(true, cx)
+        model.notify(cx);
+        self.load_more_notifications(true, model, cx)
     }
 
     fn handle_disconnect(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        cx.notify()
+        model.notify(cx)
     }
 
     async fn handle_new_notification(
@@ -245,7 +246,7 @@ impl NotificationStore {
                 if let Some(rpc::Notification::ChannelMessageMention { message_id, .. }) =
                     Notification::from_proto(&notification)
                 {
-                    let fetch_message_task = this.channel_store.update(cx, |this, cx| {
+                    let fetch_message_task = this.channel_store.update(cx, |this, model, cx| {
                         this.fetch_channel_messages(vec![message_id], cx)
                     });
 
@@ -255,7 +256,7 @@ impl NotificationStore {
                             for message in messages {
                                 this.channel_messages.insert(message_id, message);
                             }
-                            cx.notify();
+                            model.notify(cx);
                         })
                     })
                     .detach_and_log_err(cx)
@@ -436,15 +437,15 @@ impl NotificationStore {
         match notification {
             Notification::ContactRequest { sender_id } => {
                 self.user_store
-                    .update(cx, |store, cx| {
-                        store.respond_to_contact_request(sender_id, response, cx)
+                    .update(cx, |store, model, cx| {
+                        store.respond_to_contact_request(sender_id, response, model, cx)
                     })
                     .detach();
             }
             Notification::ChannelInvitation { channel_id, .. } => {
                 self.channel_store
-                    .update(cx, |store, cx| {
-                        store.respond_to_channel_invite(ChannelId(channel_id), response, cx)
+                    .update(cx, |store, model, cx| {
+                        store.respond_to_channel_invite(ChannelId(channel_id), response, model, cx)
                     })
                     .detach();
             }

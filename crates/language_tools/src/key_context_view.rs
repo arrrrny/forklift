@@ -6,9 +6,9 @@ use itertools::Itertools;
 use serde_json::json;
 use settings::get_key_equivalents;
 use ui::{
-    div, h_flex, px, v_flex, ButtonCommon, Clickable, FluentBuilder, InteractiveElement, Label,
-    LabelCommon, LabelSize, ParentElement, SharedString, StatefulInteractiveElement, Styled,
-    AppContext, VisualContext,
+    div, h_flex, px, v_flex, AppContext, ButtonCommon, Clickable, FluentBuilder,
+    InteractiveElement, Label, LabelCommon, LabelSize, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, VisualContext,
 };
 use ui::{Button, ButtonStyle};
 use workspace::Item;
@@ -19,7 +19,7 @@ actions!(debug, [OpenKeyContextView]);
 pub fn init(cx: &mut AppContext) {
     cx.observe_new_views(|workspace: &mut Workspace, _| {
         workspace.register_action(|workspace, _: &OpenKeyContextView, cx| {
-            let key_context_view = cx.new_view(KeyContextView::new);
+            let key_context_view = cx.new_model(KeyContextView::new);
             workspace.add_item_to_active_pane(Box::new(key_context_view), None, true, cx)
         });
     })
@@ -93,7 +93,7 @@ impl KeyContextView {
             if this.pending_keystrokes.is_some() {
                 this.last_keystrokes.take();
             }
-            cx.notify();
+            model.notify(cx);
         });
 
         Self {
@@ -115,9 +115,14 @@ impl FocusableView for KeyContextView {
     }
 }
 impl KeyContextView {
-    fn set_context_stack(&mut self, stack: Vec<KeyContext>, model: &Model<Self>, cx: &mut AppContext) {
+    fn set_context_stack(
+        &mut self,
+        stack: Vec<KeyContext>,
+        model: &Model<Self>,
+        cx: &mut AppContext,
+    ) {
         self.context_stack = stack;
-        cx.notify()
+        model.notify(cx)
     }
 
     fn matches(&self, predicate: &KeyBindingContextPredicate) -> bool {
@@ -156,12 +161,13 @@ impl Item for KeyContextView {
     fn clone_on_split(
         &self,
         _workspace_id: Option<workspace::WorkspaceId>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Option<gpui::View<Self>>
     where
         Self: Sized,
     {
-        Some(cx.new_view(Self::new))
+        Some(cx.new_model(Self::new))
     }
 }
 
@@ -220,7 +226,7 @@ impl Render for KeyContextView {
                     .child(
                         Button::new("default", "Edit your keymap")
                             .style(ButtonStyle::Filled)
-                            .key_binding(ui::KeyBinding::for_action(&zed_actions::OpenKeymap, cx))
+                            .key_binding(ui::KeyBinding::for_action(&zed_actions::OpenKeymap, model, model, cx))
                             .on_click(|_, cx| {
                                 cx.dispatch_action(workspace::SplitRight.boxed_clone());
                                 cx.dispatch_action(zed_actions::OpenKeymap.boxed_clone());

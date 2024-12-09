@@ -184,15 +184,15 @@ impl<D: PickerDelegate> Picker<D> {
             cx,
         );
 
-        Self::new(delegate, ContainerKind::UniformList, head, cx)
+        Self::new(delegate, ContainerKind::UniformList, head, model, cx)
     }
 
     /// A picker, which displays its matches using `gpui::uniform_list`, all matches should have the same height.
     /// If `PickerDelegate::render_match` can return items with different heights, use `Picker::list`.
     pub fn nonsearchable_uniform_list(delegate: D, model: &Model<Self>, cx: &mut AppContext) -> Self {
-        let head = Head::empty(Self::on_empty_head_blur, cx);
+        let head = Head::empty(Self::on_empty_head_blur, model, cx);
 
-        Self::new(delegate, ContainerKind::UniformList, head, cx)
+        Self::new(delegate, ContainerKind::UniformList, head, model, cx)
     }
 
     /// A picker, which displays its matches using `gpui::list`, matches can have different heights.
@@ -205,24 +205,24 @@ impl<D: PickerDelegate> Picker<D> {
             cx,
         );
 
-        Self::new(delegate, ContainerKind::List, head, cx)
+        Self::new(delegate, ContainerKind::List, head, model, cx)
     }
 
     fn new(delegate: D, container: ContainerKind, head: Head, model: &Model<Self>, cx: &mut AppContext) -> Self {
         let mut this = Self {
             delegate,
             head,
-            element_container: Self::create_element_container(container, cx),
+            element_container: Self::create_element_container(container, model, cx),
             pending_update_matches: None,
             confirm_on_update: None,
             width: None,
             max_height: Some(rems(18.).into()),
             is_modal: true,
         };
-        this.update_matches("".to_string(), cx);
+        this.update_matches("".to_string(), model, cx);
         // give the delegate 4ms to render the first set of suggestions.
         this.delegate
-            .finalize_update_matches("".to_string(), Duration::from_millis(4), cx);
+            .finalize_update_matches("".to_string(), Duration::from_millis(4), model, cx);
         this
     }
 
@@ -243,7 +243,7 @@ impl<D: PickerDelegate> Picker<D> {
                     move |ix, cx| {
                         view.upgrade()
                             .map(|view| {
-                                view.update(cx, |this, cx| {
+                                view.update(cx, |this, model, cx| {
                                     this.render_element(cx, ix).into_any_element()
                                 })
                             })
@@ -284,11 +284,11 @@ impl<D: PickerDelegate> Picker<D> {
         model: &Model<Self>, cx: &mut AppContext,
     ) {
         let previous_index = self.delegate.selected_index();
-        self.delegate.set_selected_index(ix, cx);
+        self.delegate.set_selected_index(ix, model, cx);
         let current_index = self.delegate.selected_index();
 
         if previous_index != current_index {
-            if let Some(action) = self.delegate.selected_index_changed(ix, cx) {
+            if let Some(action) = self.delegate.selected_index_changed(ix, model, cx) {
                 action(cx);
             }
             if scroll_to_index {
@@ -302,8 +302,8 @@ impl<D: PickerDelegate> Picker<D> {
         if count > 0 {
             let index = self.delegate.selected_index();
             let ix = if index == count - 1 { 0 } else { index + 1 };
-            self.set_selected_index(ix, true, cx);
-            cx.notify();
+            self.set_selected_index(ix, true, model, cx);
+            model.notify(cx);
         }
     }
 
@@ -312,24 +312,24 @@ impl<D: PickerDelegate> Picker<D> {
         if count > 0 {
             let index = self.delegate.selected_index();
             let ix = if index == 0 { count - 1 } else { index - 1 };
-            self.set_selected_index(ix, true, cx);
-            cx.notify();
+            self.set_selected_index(ix, true, model, cx);
+            model.notify(cx);
         }
     }
 
     fn select_first(&mut self, _: &menu::SelectFirst, model: &Model<Self>, cx: &mut AppContext) {
         let count = self.delegate.match_count();
         if count > 0 {
-            self.set_selected_index(0, true, cx);
-            cx.notify();
+            self.set_selected_index(0, true, model, cx);
+            model.notify(cx);
         }
     }
 
     fn select_last(&mut self, _: &menu::SelectLast, model: &Model<Self>, cx: &mut AppContext) {
         let count = self.delegate.match_count();
         if count > 0 {
-            self.set_selected_index(count - 1, true, cx);
-            cx.notify();
+            self.set_selected_index(count - 1, true, model, cx);
+            model.notify(cx);
         }
     }
 
@@ -337,8 +337,8 @@ impl<D: PickerDelegate> Picker<D> {
         let count = self.delegate.match_count();
         let index = self.delegate.selected_index();
         let new_index = if index + 1 == count { 0 } else { index + 1 };
-        self.set_selected_index(new_index, true, cx);
-        cx.notify();
+        self.set_selected_index(new_index, true, model, cx);
+        model.notify(cx);
     }
 
     pub fn cancel(&mut self, _: &menu::Cancel, model: &Model<Self>, cx: &mut AppContext) {
@@ -352,12 +352,12 @@ impl<D: PickerDelegate> Picker<D> {
         if self.pending_update_matches.is_some()
             && !self
                 .delegate
-                .finalize_update_matches(self.query(cx), Duration::from_millis(16), cx)
+                .finalize_update_matches(self.query(cx), Duration::from_millis(16), model, cx)
         {
             self.confirm_on_update = Some(false)
         } else {
             self.pending_update_matches.take();
-            self.do_confirm(false, cx);
+            self.do_confirm(false, model, cx);
         }
     }
 
@@ -365,21 +365,21 @@ impl<D: PickerDelegate> Picker<D> {
         if self.pending_update_matches.is_some()
             && !self
                 .delegate
-                .finalize_update_matches(self.query(cx), Duration::from_millis(16), cx)
+                .finalize_update_matches(self.query(cx), Duration::from_millis(16), model, cx)
         {
             self.confirm_on_update = Some(true)
         } else {
-            self.do_confirm(true, cx);
+            self.do_confirm(true, model, cx);
         }
     }
 
     fn confirm_input(&mut self, input: &ConfirmInput, model: &Model<Self>, cx: &mut AppContext) {
-        self.delegate.confirm_input(input.secondary, cx);
+        self.delegate.confirm_input(input.secondary, model, cx);
     }
 
     fn confirm_completion(&mut self, _: &ConfirmCompletion, model: &Model<Self>, cx: &mut AppContext) {
-        if let Some(new_query) = self.delegate.confirm_completion(self.query(cx), cx) {
-            self.set_query(new_query, cx);
+        if let Some(new_query) = self.delegate.confirm_completion(self.query(cx), model, cx) {
+            self.set_query(new_query, model, cx);
         } else {
             cx.propagate()
         }
@@ -388,16 +388,16 @@ impl<D: PickerDelegate> Picker<D> {
     fn handle_click(&mut self, ix: usize, secondary: bool, model: &Model<Self>, cx: &mut AppContext) {
         cx.stop_propagation();
         cx.prevent_default();
-        self.set_selected_index(ix, false, cx);
-        self.do_confirm(secondary, cx)
+        self.set_selected_index(ix, false, model, cx);
+        self.do_confirm(secondary, model, cx)
     }
 
     fn do_confirm(&mut self, secondary: bool, model: &Model<Self>, cx: &mut AppContext) {
         if let Some(update_query) = self.delegate.confirm_update_query(cx) {
-            self.set_query(update_query, cx);
-            self.delegate.set_selected_index(0, cx);
+            self.set_query(update_query, model, cx);
+            self.delegate.set_selected_index(0, model, cx);
         } else {
-            self.delegate.confirm(secondary, cx)
+            self.delegate.confirm(secondary, model, cx)
         }
     }
 
@@ -413,10 +413,10 @@ impl<D: PickerDelegate> Picker<D> {
         match event {
             editor::EditorEvent::BufferEdited => {
                 let query = editor.read(cx).text(cx);
-                self.update_matches(query, cx);
+                self.update_matches(query, model, cx);
             }
             editor::EditorEvent::Blurred => {
-                self.cancel(&menu::Cancel, cx);
+                self.cancel(&menu::Cancel, model, cx);
             }
             _ => {}
         }
@@ -426,16 +426,16 @@ impl<D: PickerDelegate> Picker<D> {
         let Head::Empty(_) = &self.head else {
             panic!("unexpected call");
         };
-        self.cancel(&menu::Cancel, cx);
+        self.cancel(&menu::Cancel, model, cx);
     }
 
     pub fn refresh_placeholder(&mut self, window: &mut gpui::Window, cx: &mut gpui::AppContext) {
         match &self.head {
             Head::Editor(view) => {
                 let placeholder = self.delegate.placeholder_text(cx);
-                view.update(cx, |this, cx| {
-                    this.set_placeholder_text(placeholder, cx);
-                    cx.notify();
+                view.update(cx, |this, model, cx| {
+                    this.set_placeholder_text(placeholder, model, cx);
+                    model.notify(cx);
                 });
             }
             Head::Empty(_) => {}
@@ -444,11 +444,11 @@ impl<D: PickerDelegate> Picker<D> {
 
     pub fn refresh(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         let query = self.query(cx);
-        self.update_matches(query, cx);
+        self.update_matches(query, model, cx);
     }
 
     pub fn update_matches(&mut self, query: String, model: &Model<Self>, cx: &mut AppContext) {
-        let delegate_pending_update_matches = self.delegate.update_matches(query, cx);
+        let delegate_pending_update_matches = self.delegate.update_matches(query, model, cx);
 
         self.matches_updated(cx);
         // This struct ensures that we can synchronously drop the task returned by the
@@ -485,9 +485,9 @@ impl<D: PickerDelegate> Picker<D> {
         self.scroll_to_item_index(index);
         self.pending_update_matches = None;
         if let Some(secondary) = self.confirm_on_update.take() {
-            self.do_confirm(secondary, cx);
+            self.do_confirm(secondary, model, cx);
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn query(&self, cx: &AppContext) -> String {
@@ -504,7 +504,7 @@ impl<D: PickerDelegate> Picker<D> {
         cx: &mut gpui::AppContext,
     ) {
         if let Head::Editor(ref editor) = &self.head {
-            editor.update(cx, |editor, cx| {
+            editor.update(cx, |editor, model, cx| {
                 editor.set_text(query, cx);
                 let editor_offset = editor.buffer().read(cx).len(cx);
                 editor.change_selections(Some(Autoscroll::Next), cx, |s| {
@@ -544,7 +544,7 @@ impl<D: PickerDelegate> Picker<D> {
             )
             .children(
                 self.delegate
-                    .render_match(ix, ix == self.delegate.selected_index(), cx),
+                    .render_match(ix, ix == self.delegate.selected_index(), model, cx),
             )
             .when(
                 self.delegate.separators_after_indices().contains(&ix),
@@ -627,7 +627,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
             .children(match &self.head {
                 Head::Editor(editor) => {
                     if editor_position == PickerEditorPosition::Start {
-                        Some(self.delegate.render_editor(&editor.clone(), cx))
+                        Some(self.delegate.render_editor(&editor.clone(), model, cx))
                     } else {
                         None
                     }
@@ -661,7 +661,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
             .children(match &self.head {
                 Head::Editor(editor) => {
                     if editor_position == PickerEditorPosition::End {
-                        Some(self.delegate.render_editor(&editor.clone(), cx))
+                        Some(self.delegate.render_editor(&editor.clone(), model, cx))
                     } else {
                         None
                     }

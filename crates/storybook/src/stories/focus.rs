@@ -18,7 +18,7 @@ impl FocusStory {
             KeyBinding::new("cmd-c", ActionC, None),
         ]);
 
-        cx.new_view(move |cx| {
+        cx.new_model(move |cx| {
             let parent_focus = cx.focus_handle();
             let child_1_focus = cx.focus_handle();
             let child_2_focus = cx.focus_handle();

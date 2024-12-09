@@ -140,7 +140,7 @@ impl Thread {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) {
-        self.insert_message(Role::User, text, cx)
+        self.insert_message(Role::User, text, model, cx)
     }
 
     pub fn insert_message(
@@ -272,7 +272,7 @@ impl Thread {
 
                         thread.touch_updated_at();
                         cx.emit(ThreadEvent::StreamedCompletion);
-                        cx.notify();
+                        model.notify(cx);
                     })?;
 
                     smol::future::yield_now().await;

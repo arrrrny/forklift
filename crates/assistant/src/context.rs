@@ -612,6 +612,7 @@ impl Context {
             tools,
             project,
             telemetry,
+            model,
             cx,
         )
     }
@@ -641,7 +642,7 @@ impl Context {
             buffer
         });
         let edits_since_last_slash_command_parse =
-            buffer.update(cx, |buffer, _| buffer.subscribe());
+            buffer.update(cx, |buffer, model, _| buffer.subscribe());
         let mut this = Self {
             id,
             timestamp: clock::Lamport::new(replica_id),
@@ -696,8 +697,8 @@ impl Context {
         );
         this.message_anchors.push(message);
 
-        this.set_language(cx);
-        this.count_remaining_tokens(cx);
+        this.set_language(model, cx);
+        this.count_remaining_tokens(model, cx);
         this
     }
 
@@ -765,14 +766,15 @@ impl Context {
             tools,
             project,
             telemetry,
+            model,
             cx,
         );
         this.path = Some(path);
-        this.buffer.update(cx, |buffer, cx| {
-            buffer.set_text(saved_context.text.as_str(), cx)
+        this.buffer.update(cx, |buffer, model, cx| {
+            buffer.set_text(saved_context.text.as_str(), model, cx)
         });
-        let operations = saved_context.into_ops(&this.buffer, cx);
-        this.apply_ops(operations, cx);
+        let operations = saved_context.into_ops(&this.buffer, model, cx);
+        this.apply_ops(operations, model, cx);
         this
     }
 
@@ -797,8 +799,9 @@ impl Context {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) {
-        self.buffer
-            .update(cx, |buffer, cx| buffer.set_capability(capability, cx));
+        self.buffer.update(cx, |buffer, model, cx| {
+            buffer.set_capability(capability, model, cx)
+        });
     }
 
     fn next_timestamp(&mut self) -> clock::Lamport {
@@ -855,9 +858,10 @@ impl Context {
                 op @ _ => self.pending_ops.push(op),
             }
         }
-        self.buffer
-            .update(cx, |buffer, cx| buffer.apply_ops(buffer_ops, cx));
-        self.flush_ops(cx);
+        self.buffer.update(cx, |buffer, model, cx| {
+            buffer.apply_ops(buffer_ops, model, cx)
+        });
+        self.flush_ops(model, cx);
     }
 
     fn flush_ops(&mut self, model: &Model<Context>, cx: &mut AppContext) {
@@ -880,7 +884,7 @@ impl Context {
                         // We already applied this operation.
                     } else {
                         changed_messages.insert(anchor.id);
-                        self.insert_message(anchor, metadata, cx);
+                        self.insert_message(anchor, metadata, model, cx);
                     }
                 }
                 ContextOperation::UpdateMessage {
@@ -968,14 +972,14 @@ impl Context {
         }
 
         if !changed_messages.is_empty() {
-            self.message_roles_updated(changed_messages, cx);
+            self.message_roles_updated(changed_messages, model, cx);
             cx.emit(ContextEvent::MessagesEdited);
-            cx.notify();
+            model.notify(cx);
         }
 
         if summary_changed {
             cx.emit(ContextEvent::SummaryChanged);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -1139,8 +1143,9 @@ impl Context {
         cx.spawn(|this, mut cx| async move {
             let markdown = markdown.await?;
             this.update(&mut cx, |this, cx| {
-                this.buffer
-                    .update(cx, |buffer, cx| buffer.set_language(Some(markdown), cx));
+                this.buffer.update(cx, |buffer, model, cx| {
+                    buffer.set_language(Some(markdown), cx)
+                });
             })
         })
         .detach_and_log_err(cx);
@@ -1161,8 +1166,8 @@ impl Context {
                 operation.clone(),
             ))),
             language::BufferEvent::Edited => {
-                self.count_remaining_tokens(cx);
-                self.reparse(cx);
+                self.count_remaining_tokens(model, cx);
+                self.reparse(model, cx);
                 cx.emit(ContextEvent::MessagesEdited);
             }
             _ => {}
@@ -1190,7 +1195,7 @@ impl Context {
                 this.update(&mut cx, |this, cx| {
                     this.token_count = Some(token_count);
                     this.start_cache_warming(&model, cx);
-                    cx.notify()
+                    model.notify(cx)
                 })
             }
             .log_err()
@@ -1284,7 +1289,7 @@ impl Context {
             new_anchor_needs_caching = new_anchor_needs_caching
                 || (invalidated_caches.contains(&message.id) && anchors.contains(&message.id));
 
-            self.update_metadata(message.id, cx, |metadata| {
+            self.update_metadata(message.id, model, cx, |metadata| {
                 let cache_status = if invalidated_caches.contains(&message.id) {
                     CacheStatus::Pending
                 } else {
@@ -1312,7 +1317,7 @@ impl Context {
     ) {
         let cache_configuration = model.cache_configuration();
 
-        if !self.mark_cache_anchors(&cache_configuration, true, cx) {
+        if !self.mark_cache_anchors(&cache_configuration, true, model, cx) {
             return;
         }
         if !self.pending_completions.is_empty() {
@@ -1375,13 +1380,13 @@ impl Context {
             .collect();
 
         for message_id in cached_message_ids {
-            self.update_metadata(message_id, cx, |metadata| {
+            self.update_metadata(message_id, model, cx, |metadata| {
                 if let Some(cache) = &mut metadata.cache {
                     cache.status = CacheStatus::Cached;
                 }
             });
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn reparse(&mut self, model: &Model<Self>, cx: &mut AppContext) {
@@ -1424,12 +1429,13 @@ impl Context {
                 &mut removed_parsed_slash_command_ranges,
                 cx,
             );
-            self.invalidate_pending_slash_commands(&buffer, cx);
+            self.invalidate_pending_slash_commands(&buffer, model, cx);
             self.reparse_patches_in_range(
                 start..end,
                 &buffer,
                 &mut updated_patches,
                 &mut removed_patches,
+                model,
                 cx,
             );
         }
@@ -1535,6 +1541,7 @@ impl Context {
                     error_message: None,
                     version: version.clone(),
                 },
+                model,
                 cx,
             );
         }
@@ -1880,7 +1887,7 @@ impl Context {
         const PENDING_OUTPUT_END_MARKER: &str = "…";
 
         let (command_range, command_source_range, insert_position, first_transaction) =
-            self.buffer.update(cx, |buffer, cx| {
+            self.buffer.update(cx, |buffer, model, cx| {
                 let command_source_range = command_source_range.to_offset(buffer);
                 let mut insertion = format!("\n{PENDING_OUTPUT_END_MARKER}");
                 if ensure_trailing_newline {
@@ -1895,9 +1902,10 @@ impl Context {
                         insertion,
                     )],
                     None,
+                    model,
                     cx,
                 );
-                let first_transaction = buffer.end_transaction(cx).unwrap();
+                let first_transaction = buffer.end_transaction(model, cx).unwrap();
                 buffer.finalize_last_transaction();
 
                 let insert_position = buffer.anchor_after(command_source_range.end + 1);
@@ -1914,7 +1922,7 @@ impl Context {
                     first_transaction,
                 )
             });
-        self.reparse(cx);
+        self.reparse(model, cx);
 
         let insert_output_task = cx.spawn(|this, mut cx| async move {
             let run_command = async {
@@ -1934,7 +1942,7 @@ impl Context {
                 while let Some(event) = stream.next().await {
                     let event = event?;
                     this.update(&mut cx, |this, cx| {
-                        this.buffer.update(cx, |buffer, _cx| {
+                        this.buffer.update(cx, |buffer, model, _cx| {
                             buffer.finalize_last_transaction();
                             buffer.start_transaction()
                         });
@@ -1963,7 +1971,7 @@ impl Context {
                                 label,
                                 metadata,
                             } => {
-                                this.buffer.update(cx, |buffer, cx| {
+                                this.buffer.update(cx, |buffer, model, cx| {
                                     let insert_point = insert_position.to_point(buffer);
                                     if insert_point.column > 0 {
                                         buffer.edit([(insert_point..insert_point, "\n")], None, cx);
@@ -1983,7 +1991,7 @@ impl Context {
                             }) => {
                                 let start = this.buffer.read(cx).anchor_before(insert_position);
 
-                                this.buffer.update(cx, |buffer, cx| {
+                                this.buffer.update(cx, |buffer, model, cx| {
                                     buffer.edit(
                                         [(insert_position..insert_position, text)],
                                         None,
@@ -2007,7 +2015,7 @@ impl Context {
                                     let offset_range = (pending_section.start..insert_position)
                                         .to_offset(this.buffer.read(cx));
                                     if !offset_range.is_empty() {
-                                        let range = this.buffer.update(cx, |buffer, _cx| {
+                                        let range = this.buffer.update(cx, |buffer, model, _cx| {
                                             buffer.anchor_after(offset_range.start)
                                                 ..buffer.anchor_before(offset_range.end)
                                         });
@@ -2026,7 +2034,7 @@ impl Context {
                             }
                         }
 
-                        this.buffer.update(cx, |buffer, cx| {
+                        this.buffer.update(cx, |buffer, model, cx| {
                             if let Some(event_transaction) = buffer.end_transaction(cx) {
                                 buffer.merge_transactions(event_transaction, first_transaction);
                             }
@@ -2035,7 +2043,7 @@ impl Context {
                 }
 
                 this.update(&mut cx, |this, cx| {
-                    this.buffer.update(cx, |buffer, cx| {
+                    this.buffer.update(cx, |buffer, model, cx| {
                         buffer.finalize_last_transaction();
                         buffer.start_transaction();
 
@@ -2133,6 +2141,7 @@ impl Context {
                 name: name.to_string(),
                 version,
             },
+            model,
             cx,
         );
     }
@@ -2163,6 +2172,7 @@ impl Context {
                 section,
                 version,
             },
+            model,
             cx,
         );
     }
@@ -2186,7 +2196,7 @@ impl Context {
                             output.push(NEWLINE);
                         }
 
-                        let anchor_range = this.buffer.update(cx, |buffer, cx| {
+                        let anchor_range = this.buffer.update(cx, |buffer, model, cx| {
                             let insert_start = buffer.len().to_offset(buffer);
                             let insert_end = insert_start;
 
@@ -2231,7 +2241,7 @@ impl Context {
     }
 
     pub fn completion_provider_changed(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        self.count_remaining_tokens(cx);
+        self.count_remaining_tokens(model, cx);
     }
 
     fn get_last_valid_message_id(&self, model: &Model<Self>, cx: &AppContext) -> Option<MessageId> {
@@ -2252,14 +2262,14 @@ impl Context {
         let model_registry = LanguageModelRegistry::read_global(cx);
         let provider = model_registry.active_provider()?;
         let model = model_registry.active_model()?;
-        let last_message_id = self.get_last_valid_message_id(cx)?;
+        let last_message_id = self.get_last_valid_message_id(model, cx)?;
 
         if !provider.is_authenticated(cx) {
             log::info!("completion provider has no credentials");
             return None;
         }
         // Compute which messages to cache, including the last one.
-        self.mark_cache_anchors(&model.cache_configuration(), false, cx);
+        self.mark_cache_anchors(&model.cache_configuration(), false, model, cx);
 
         let mut request = self.to_completion_request(request_type, cx);
 
@@ -2277,12 +2287,24 @@ impl Context {
         }
 
         let assistant_message = self
-            .insert_message_after(last_message_id, Role::Assistant, MessageStatus::Pending, cx)
+            .insert_message_after(
+                last_message_id,
+                Role::Assistant,
+                MessageStatus::Pending,
+                model,
+                cx,
+            )
             .unwrap();
 
         // Queue up the user's next reply.
         let user_message = self
-            .insert_message_after(assistant_message.id, Role::User, MessageStatus::Done, cx)
+            .insert_message_after(
+                assistant_message.id,
+                Role::User,
+                MessageStatus::Done,
+                model,
+                cx,
+            )
             .unwrap();
 
         let pending_completion_id = post_inc(&mut self.completion_count);
@@ -2308,7 +2330,7 @@ impl Context {
                                 .message_anchors
                                 .iter()
                                 .position(|message| message.id == assistant_message_id)?;
-                            this.buffer.update(cx, |buffer, cx| {
+                            this.buffer.update(cx, |buffer, model, cx| {
                                 let message_old_end_offset = this.message_anchors[message_ix + 1..]
                                     .iter()
                                     .find(|message| message.start.is_valid(buffer))
@@ -2613,7 +2635,7 @@ impl Context {
             }
         }
 
-        self.message_roles_updated(ids, cx);
+        self.message_roles_updated(ids, model, cx);
     }
 
     fn message_roles_updated(
@@ -2633,7 +2655,7 @@ impl Context {
         let mut updated = Vec::new();
         let mut removed = Vec::new();
         for range in ranges {
-            self.reparse_patches_in_range(range, &buffer, &mut updated, &mut removed, cx);
+            self.reparse_patches_in_range(range, &buffer, &mut updated, &mut removed, model, cx);
         }
 
         if !updated.is_empty() || !removed.is_empty() {
@@ -2658,9 +2680,9 @@ impl Context {
                 metadata: metadata.clone(),
                 version,
             };
-            self.push_op(operation, cx);
+            self.push_op(operation, model, cx);
             cx.emit(ContextEvent::MessagesEdited);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -2693,7 +2715,7 @@ impl Context {
                 .map_or(buffer.len(), |message| {
                     buffer.clip_offset(message.start.to_offset(buffer) - 1, Bias::Left)
                 });
-            Some(self.insert_message_at_offset(offset, role, status, cx))
+            Some(self.insert_message_at_offset(offset, role, status, model, cx))
         } else {
             None
         }
@@ -2707,8 +2729,8 @@ impl Context {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) -> MessageAnchor {
-        let start = self.buffer.update(cx, |buffer, cx| {
-            buffer.edit([(offset..offset, "\n")], None, cx);
+        let start = self.buffer.update(cx, |buffer, model, cx| {
+            buffer.edit([(offset..offset, "\n")], None, model, cx);
             buffer.anchor_before(offset + 1)
         });
 
@@ -2723,13 +2745,14 @@ impl Context {
             timestamp: anchor.id.0,
             cache: None,
         };
-        self.insert_message(anchor.clone(), metadata.clone(), cx);
+        self.insert_message(anchor.clone(), metadata.clone(), model, cx);
         self.push_op(
             ContextOperation::InsertMessage {
                 anchor: anchor.clone(),
                 metadata,
                 version,
             },
+            model,
             cx,
         );
         anchor
@@ -2800,8 +2823,8 @@ impl Context {
                     start: self.buffer.read(cx).anchor_before(suffix_start),
                 }
             } else {
-                self.buffer.update(cx, |buffer, cx| {
-                    buffer.edit([(range.end..range.end, "\n")], None, cx);
+                self.buffer.update(cx, |buffer, model, cx| {
+                    buffer.edit([(range.end..range.end, "\n")], None, model, cx);
                 });
                 edited_buffer = true;
                 MessageAnchor {
@@ -2816,13 +2839,14 @@ impl Context {
                 timestamp: suffix.id.0,
                 cache: None,
             };
-            self.insert_message(suffix.clone(), suffix_metadata.clone(), cx);
+            self.insert_message(suffix.clone(), suffix_metadata.clone(), model, cx);
             self.push_op(
                 ContextOperation::InsertMessage {
                     anchor: suffix.clone(),
                     metadata: suffix_metadata,
                     version,
                 },
+                model,
                 cx,
             );
 
@@ -2850,8 +2874,8 @@ impl Context {
                             start: self.buffer.read(cx).anchor_before(prefix_end),
                         }
                     } else {
-                        self.buffer.update(cx, |buffer, cx| {
-                            buffer.edit([(range.start..range.start, "\n")], None, cx)
+                        self.buffer.update(cx, |buffer, model, cx| {
+                            buffer.edit([(range.start..range.start, "\n")], None, model, cx)
                         });
                         edited_buffer = true;
                         MessageAnchor {
@@ -2866,13 +2890,14 @@ impl Context {
                         timestamp: selection.id.0,
                         cache: None,
                     };
-                    self.insert_message(selection.clone(), selection_metadata.clone(), cx);
+                    self.insert_message(selection.clone(), selection_metadata.clone(), model, cx);
                     self.push_op(
                         ContextOperation::InsertMessage {
                             anchor: selection.clone(),
                             metadata: selection_metadata,
                             version,
                         },
+                        model,
                         cx,
                     );
 

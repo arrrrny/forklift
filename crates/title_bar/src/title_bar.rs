@@ -52,8 +52,8 @@ actions!(
 
 pub fn init(cx: &mut AppContext) {
     cx.observe_new_views(|workspace: &mut Workspace, cx| {
-        let item = cx.new_view(|cx| TitleBar::new("title-bar", workspace, cx));
-        workspace.set_titlebar_item(item.into(), cx)
+        let item = cx.new_model(|model, cx| TitleBar::new("title-bar", workspace, model, cx));
+        workspace.set_titlebar_item(item.into(), model, cx)
     })
     .detach();
 }
@@ -153,7 +153,7 @@ impl Render for TitleBar {
                                 if matches!(status, client::Status::Connected { .. }) {
                                     el.child(self.render_user_menu_button(cx))
                                 } else {
-                                    el.children(self.render_connection_status(status, cx))
+                                    el.children(self.render_connection_status(status, model, cx))
                                         .child(self.render_sign_in_button(cx))
                                         .child(self.render_user_menu_button(cx))
                                 }
@@ -219,20 +219,20 @@ impl TitleBar {
         let application_menu = match platform_style {
             PlatformStyle::Mac => None,
             PlatformStyle::Linux | PlatformStyle::Windows => {
-                Some(cx.new_view(ApplicationMenu::new))
+                Some(cx.new_model(ApplicationMenu::new))
             }
         };
 
         let mut subscriptions = Vec::new();
         subscriptions.push(
             cx.observe(&workspace.weak_handle().upgrade().unwrap(), |_, _, cx| {
-                cx.notify()
+                model.notify(cx)
             }),
         );
-        subscriptions.push(cx.observe(&project, |_, _, cx| cx.notify()));
+        subscriptions.push(cx.observe(&project, |_, _, cx| model.notify(cx)));
         subscriptions.push(cx.observe(&active_call, |this, _, cx| this.active_call_changed(cx)));
         subscriptions.push(cx.observe_window_activation(Self::window_activation_changed));
-        subscriptions.push(cx.observe(&user_store, |_, _, cx| cx.notify()));
+        subscriptions.push(cx.observe(&user_store, |_, _, cx| model.notify(cx)));
 
         Self {
             platform_style,
@@ -325,7 +325,7 @@ impl TitleBar {
                         .child(Label::new(nickname.clone()).size(LabelSize::Small)),
                 )
                 .tooltip(move |cx| {
-                    Tooltip::with_meta("Remote Project", Some(&OpenRemote), meta.clone(), cx)
+                    Tooltip::with_meta("Remote Project", Some(&OpenRemote), meta.clone(), model, cx)
                 })
                 .on_click(|_, cx| {
                     cx.dispatch_action(OpenRemote.boxed_clone());
@@ -379,7 +379,7 @@ impl TitleBar {
                     let host_peer_id = host.peer_id;
                     cx.listener(move |this, _, cx| {
                         this.workspace
-                            .update(cx, |workspace, cx| {
+                            .update(cx, |workspace, model, cx| {
                                 workspace.follow(host_peer_id, cx);
                             })
                             .log_err();
@@ -419,6 +419,7 @@ impl TitleBar {
                     &zed_actions::OpenRecent {
                         create_new_window: false,
                     },
+                    model,
                     cx,
                 )
             })
@@ -461,11 +462,12 @@ impl TitleBar {
                         "Recent Branches",
                         Some(&zed_actions::branches::OpenRecent),
                         "Local branches only",
+                        model,
                         cx,
                     )
                 })
                 .on_click(move |_, cx| {
-                    let _ = workspace.update(cx, |_this, cx| {
+                    let _ = workspace.update(cx, |_this, model, cx| {
                         cx.dispatch_action(zed_actions::branches::OpenRecent.boxed_clone());
                     });
                 }),
@@ -475,29 +477,31 @@ impl TitleBar {
     fn window_activation_changed(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         if cx.is_window_active() {
             ActiveCall::global(cx)
-                .update(cx, |call, cx| call.set_location(Some(&self.project), cx))
+                .update(cx, |call, model, cx| {
+                    call.set_location(Some(&self.project), model, cx)
+                })
                 .detach_and_log_err(cx);
         } else if cx.active_window().is_none() {
             ActiveCall::global(cx)
-                .update(cx, |call, cx| call.set_location(None, cx))
+                .update(cx, |call, model, cx| call.set_location(None, model, cx))
                 .detach_and_log_err(cx);
         }
         self.workspace
-            .update(cx, |workspace, cx| {
+            .update(cx, |workspace, model, cx| {
                 workspace.update_active_view_for_followers(cx);
             })
             .ok();
     }
 
     fn active_call_changed(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        cx.notify();
+        model.notify(cx);
     }
 
     fn share_project(&mut self, _: &ShareProject, model: &Model<Self>, cx: &mut AppContext) {
         let active_call = ActiveCall::global(cx);
         let project = self.project.clone();
         active_call
-            .update(cx, |call, cx| call.share_project(project, cx))
+            .update(cx, |call, model, cx| call.share_project(project, model, cx))
             .detach_and_log_err(cx);
     }
 
@@ -505,7 +509,7 @@ impl TitleBar {
         let active_call = ActiveCall::global(cx);
         let project = self.project.clone();
         active_call
-            .update(cx, |call, cx| call.unshare_project(project, cx))
+            .update(cx, |call, model, cx| call.unshare_project(project, model, cx))
             .log_err();
     }
 
@@ -549,7 +553,7 @@ impl TitleBar {
                                     return;
                                 }
                             }
-                            auto_update::check(&Default::default(), cx);
+                            auto_update::check(&Default::default(), model, cx);
                         })
                         .into_any_element(),
                 )
@@ -584,7 +588,7 @@ impl TitleBar {
             let plan = user_store.current_plan();
             PopoverMenu::new("user-menu")
                 .menu(move |cx| {
-                    ContextMenu::build(cx, |menu, cx| {
+                    ContextMenu::build(cx, window, |menu, model, window, cx| {
                         menu.when(cx.has_flag::<ZedPro>(), |menu| {
                             menu.action(
                                 format!(
@@ -641,7 +645,7 @@ impl TitleBar {
         } else {
             PopoverMenu::new("user-menu")
                 .menu(|cx| {
-                    ContextMenu::build(cx, |menu, _| {
+                    ContextMenu::build(cx, window, |menu, model, window, cx| {
                         menu.action("Settings", zed_actions::OpenSettings.boxed_clone())
                             .action("Key Bindings", Box::new(zed_actions::OpenKeymap))
                             .action(

@@ -152,11 +152,12 @@ impl TerminalView {
 
             workspace
                 .update(&mut cx, |workspace, cx| {
-                    let view = cx.new_view(|cx| {
+                    let view = cx.new_model(|model, cx| {
                         TerminalView::new(
                             terminal,
                             workspace.weak_handle(),
                             workspace.database_id(),
+                            model,
                             cx,
                         )
                     });
@@ -173,10 +174,11 @@ impl TerminalView {
         terminal: Model<Terminal>,
         workspace: WeakView<Workspace>,
         workspace_id: Option<WorkspaceId>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Self {
         let workspace_handle = workspace.clone();
-        let terminal_subscriptions = subscribe_for_terminal_events(&terminal, workspace, cx);
+        let terminal_subscriptions = subscribe_for_terminal_events(&terminal, workspace, model, cx);
 
         let focus_handle = cx.focus_handle();
         let focus_in = cx.on_focus_in(&focus_handle, |terminal_view, cx| {
@@ -239,7 +241,7 @@ impl TerminalView {
             .map_or(false, |terminal_panel| {
                 terminal_panel.read(cx).assistant_enabled()
             });
-        let context_menu = ContextMenu::build(cx, |menu, _| {
+        let context_menu = ContextMenu::build(cx, window, |menu, model, window, cx| {
             menu.context(self.focus_handle.clone())
                 .action("New Terminal", Box::new(NewTerminal))
                 .separator()
@@ -264,7 +266,7 @@ impl TerminalView {
                     cx.focus_self();
                 }
                 this.context_menu.take();
-                cx.notify();
+                model.notify(cx);
             });
 
         self.context_menu = Some((context_menu, position, subscription));
@@ -278,12 +280,12 @@ impl TerminalView {
         let old_cursor_shape = self.cursor_shape;
         if old_cursor_shape != new_cursor_shape {
             self.cursor_shape = new_cursor_shape;
-            self.terminal.update(cx, |term, _| {
+            self.terminal.update(cx, |term, model, _| {
                 term.set_cursor_shape(self.cursor_shape);
             });
         }
 
-        cx.notify();
+        model.notify(cx);
     }
 
     fn show_character_palette(&mut self, _: &ShowCharacterPalette, model: &Model<Self>, cx: &mut AppContext) {
@@ -294,7 +296,7 @@ impl TerminalView {
             .mode
             .contains(TermMode::ALT_SCREEN)
         {
-            self.terminal.update(cx, |term, cx| {
+            self.terminal.update(cx, |term, model, cx| {
                 term.try_keystroke(
                     &Keystroke::parse("ctrl-cmd-space").unwrap(),
                     TerminalSettings::get_global(cx).option_as_meta,
@@ -306,14 +308,14 @@ impl TerminalView {
     }
 
     fn select_all(&mut self, _: &SelectAll, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal.update(cx, |term, _| term.select_all());
-        cx.notify();
+        self.terminal.update(cx, |term, model, _| term.select_all());
+        model.notify(cx);
     }
 
     fn clear(&mut self, _: &Clear, model: &Model<Self>, cx: &mut AppContext) {
         self.scroll_top = px(0.);
-        self.terminal.update(cx, |term, _| term.clear());
-        cx.notify();
+        self.terminal.update(cx, |term, model, _| term.clear());
+        model.notify(cx);
     }
 
     fn max_scroll_top(&self, cx: &AppContext) -> Pixels {
@@ -363,13 +365,13 @@ impl TerminalView {
                     Pixels::ZERO,
                     cmp::min(self.scroll_top - y_delta, self.max_scroll_top(cx)),
                 );
-                cx.notify();
+                model.notify(cx);
                 return;
             }
         }
 
         self.terminal
-            .update(cx, |term, _| term.scroll_wheel(event, origin));
+            .update(cx, |term, model, _| term.scroll_wheel(event, origin));
     }
 
     fn scroll_line_up(&mut self, _: &ScrollLineUp, model: &Model<Self>, cx: &mut AppContext) {
@@ -383,8 +385,8 @@ impl TerminalView {
             return;
         }
 
-        self.terminal.update(cx, |term, _| term.scroll_line_up());
-        cx.notify();
+        self.terminal.update(cx, |term, model, _| term.scroll_line_up());
+        model.notify(cx);
     }
 
     fn scroll_line_down(&mut self, _: &ScrollLineDown, model: &Model<Self>, cx: &mut AppContext) {
@@ -398,13 +400,13 @@ impl TerminalView {
             return;
         }
 
-        self.terminal.update(cx, |term, _| term.scroll_line_down());
-        cx.notify();
+        self.terminal.update(cx, |term, model, _| term.scroll_line_down());
+        model.notify(cx);
     }
 
     fn scroll_page_up(&mut self, _: &ScrollPageUp, model: &Model<Self>, cx: &mut AppContext) {
         if self.scroll_top == Pixels::ZERO {
-            self.terminal.update(cx, |term, _| term.scroll_page_up());
+            self.terminal.update(cx, |term, model, _| term.scroll_page_up());
         } else {
             let line_height = self.terminal.read(cx).last_content.size.line_height();
             let visible_block_lines = (self.scroll_top / line_height) as usize;
@@ -416,37 +418,37 @@ impl TerminalView {
             } else {
                 self.scroll_top = px(0.);
                 self.terminal
-                    .update(cx, |term, _| term.scroll_up_by(visible_content_lines));
+                    .update(cx, |term, model, _| term.scroll_up_by(visible_content_lines));
             }
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     fn scroll_page_down(&mut self, _: &ScrollPageDown, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal.update(cx, |term, _| term.scroll_page_down());
+        self.terminal.update(cx, |term, model, _| term.scroll_page_down());
         let terminal = self.terminal.read(cx);
         if terminal.last_content().display_offset < terminal.viewport_lines() {
             self.scroll_top = self.max_scroll_top(cx);
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     fn scroll_to_top(&mut self, _: &ScrollToTop, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal.update(cx, |term, _| term.scroll_to_top());
-        cx.notify();
+        self.terminal.update(cx, |term, model, _| term.scroll_to_top());
+        model.notify(cx);
     }
 
     fn scroll_to_bottom(&mut self, _: &ScrollToBottom, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal.update(cx, |term, _| term.scroll_to_bottom());
+        self.terminal.update(cx, |term, model, _| term.scroll_to_bottom());
         if self.block_below_cursor.is_some() {
             self.scroll_top = self.max_scroll_top(cx);
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     fn toggle_vi_mode(&mut self, _: &ToggleViMode, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal.update(cx, |term, _| term.toggle_vi_mode());
-        cx.notify();
+        self.terminal.update(cx, |term, model, _| term.toggle_vi_mode());
+        model.notify(cx);
     }
 
     pub fn should_show_cursor(&self, focused: bool, model: &Model<Self>, cx: &mut AppContext) -> bool {
@@ -477,7 +479,7 @@ impl TerminalView {
     fn blink_cursors(&mut self, epoch: usize, model: &Model<Self>, cx: &mut AppContext) {
         if epoch == self.blink_epoch && !self.blinking_paused {
             self.blink_state = !self.blink_state;
-            cx.notify();
+            model.notify(cx);
 
             let epoch = self.next_blink_epoch();
             cx.spawn(|this, mut cx| async move {
@@ -491,7 +493,7 @@ impl TerminalView {
 
     pub fn pause_cursor_blinking(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         self.blink_state = true;
-        cx.notify();
+        model.notify(cx);
 
         let epoch = self.next_blink_epoch();
         cx.spawn(|this, mut cx| async move {
@@ -508,14 +510,14 @@ impl TerminalView {
 
     pub fn set_block_below_cursor(&mut self, block: BlockProperties, model: &Model<Self>, cx: &mut AppContext) {
         self.block_below_cursor = Some(Rc::new(block));
-        self.scroll_to_bottom(&ScrollToBottom, cx);
-        cx.notify();
+        self.scroll_to_bottom(&ScrollToBottom, model, cx);
+        model.notify(model, cx);
     }
 
     pub fn clear_block_below_cursor(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         self.block_below_cursor = None;
         self.scroll_top = Pixels::ZERO;
-        cx.notify();
+        model.notify(cx);
     }
 
     fn next_blink_epoch(&mut self) -> usize {
@@ -526,27 +528,27 @@ impl TerminalView {
     fn resume_cursor_blinking(&mut self, epoch: usize, model: &Model<Self>, cx: &mut AppContext) {
         if epoch == self.blink_epoch {
             self.blinking_paused = false;
-            self.blink_cursors(epoch, cx);
+            self.blink_cursors(epoch, model, cx);
         }
     }
 
     ///Attempt to paste the clipboard into the terminal
     fn copy(&mut self, _: &Copy, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal.update(cx, |term, _| term.copy());
-        cx.notify();
+        self.terminal.update(cx, |term, model, _| term.copy());
+        model.notify(cx);
     }
 
     ///Attempt to paste the clipboard into the terminal
     fn paste(&mut self, _: &Paste, model: &Model<Self>, cx: &mut AppContext) {
         if let Some(clipboard_string) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.terminal
-                .update(cx, |terminal, _cx| terminal.paste(&clipboard_string));
+                .update(cx, |terminal, model, _cx| terminal.paste(&clipboard_string));
         }
     }
 
     fn send_text(&mut self, text: &SendText, model: &Model<Self>, cx: &mut AppContext) {
         self.clear_bell(cx);
-        self.terminal.update(cx, |term, _| {
+        self.terminal.update(cx, |term, model, _| {
             term.input(text.0.to_string());
         });
     }
@@ -554,7 +556,7 @@ impl TerminalView {
     fn send_keystroke(&mut self, text: &SendKeystroke, model: &Model<Self>, cx: &mut AppContext) {
         if let Some(keystroke) = Keystroke::parse(&text.0).log_err() {
             self.clear_bell(cx);
-            self.terminal.update(cx, |term, cx| {
+            self.terminal.update(cx, |term, model, cx| {
                 term.try_keystroke(&keystroke, TerminalSettings::get_global(cx).option_as_meta);
             });
         }
@@ -637,7 +639,7 @@ impl TerminalView {
 
     fn set_terminal(&mut self, terminal: Model<Terminal>, model: &Model<_>, cx: &mut AppContext) {
         self._terminal_subscriptions =
-            subscribe_for_terminal_events(&terminal, self.workspace.clone(), cx);
+            subscribe_for_terminal_events(&terminal, self.workspace.clone(), model, cx);
         self.terminal = terminal;
     }
 }
@@ -647,11 +649,11 @@ fn subscribe_for_terminal_events(
     workspace: WeakView<Workspace>,
     model: &Model<_>, cx: &mut AppContext,
 ) -> Vec<Subscription> {
-    let terminal_subscription = cx.observe(terminal, |_, _, cx| cx.notify());
+    let terminal_subscription = cx.observe(terminal, |_, _, cx| model.notify(cx));
     let terminal_events_subscription =
         cx.subscribe(terminal, move |this, _, event, cx| match event {
             Event::Wakeup => {
-                cx.notify();
+                model.notify(cx);
                 cx.emit(Event::Wakeup);
                 cx.emit(ItemEvent::UpdateTab);
                 cx.emit(SearchEvent::MatchesInvalidated);
@@ -679,7 +681,7 @@ fn subscribe_for_terminal_events(
                 this.can_navigate_to_selected_word = match maybe_navigation_target {
                     Some(MaybeNavigationTarget::Url(_)) => true,
                     Some(MaybeNavigationTarget::PathLike(path_like_target)) => {
-                        if let Ok(fs) = workspace.update(cx, |workspace, cx| {
+                        if let Ok(fs) = workspace.update(cx, |workspace, model, cx| {
                             workspace.project().read(cx).fs().clone()
                         }) {
                             let valid_files_to_open_task = possible_open_targets(
@@ -687,7 +689,7 @@ fn subscribe_for_terminal_events(
                                 &workspace,
                                 &path_like_target.terminal_dir,
                                 &path_like_target.maybe_path,
-                                cx,
+                                model, cx,
                             );
                             !smol::block_on(valid_files_to_open_task).is_empty()
                         } else {
@@ -707,7 +709,7 @@ fn subscribe_for_terminal_events(
                     }
                     let task_workspace = workspace.clone();
                     let Some(fs) = workspace
-                        .update(cx, |workspace, cx| {
+                        .update(cx, |workspace, model, cx| {
                             workspace.project().read(cx).fs().clone()
                         })
                         .ok()
@@ -724,6 +726,7 @@ fn subscribe_for_terminal_events(
                                     &task_workspace,
                                     &path_like_target.terminal_dir,
                                     &path_like_target.maybe_path,
+                                    model,
                                     cx,
                                 )
                             })?
@@ -780,7 +783,7 @@ fn subscribe_for_terminal_events(
 
                         if has_dirs {
                             task_workspace.update(&mut cx, |workspace, cx| {
-                                workspace.project().update(cx, |_, cx| {
+                                workspace.project().update(cx, |_, model, cx| {
                                     cx.emit(project::Event::ActivateProjectPanel);
                                 })
                             })?;
@@ -863,7 +866,7 @@ fn possible_open_targets(
             potential_cwd_and_workspace_paths.insert(canonicalized_path);
         }
         if let Some(workspace) = workspace.upgrade() {
-            workspace.update(cx, |workspace, cx| {
+            workspace.update(cx, |workspace, model, cx| {
                 for potential_worktree_path in workspace
                     .worktrees(cx)
                     .map(|worktree| worktree.read(cx).abs_path().join(&maybe_path))
@@ -891,7 +894,7 @@ fn possible_open_targets(
             row,
             column,
             potential_cwd_and_workspace_paths,
-            cx,
+            model, cx,
         );
     };
 
@@ -903,7 +906,7 @@ fn possible_open_targets(
         None => HashSet::default(),
     };
 
-    possible_open_paths_metadata(fs, row, column, canonicalized_paths, cx)
+    possible_open_paths_metadata(fs, row, column, canonicalized_paths, model, cx)
 }
 
 fn regex_to_literal(regex: &str) -> String {
@@ -933,7 +936,7 @@ impl TerminalView {
         self.clear_bell(cx);
         self.pause_cursor_blinking(cx);
 
-        self.terminal.update(cx, |term, cx| {
+        self.terminal.update(cx, |term, model, cx| {
             let handled = term.try_keystroke(
                 &event.keystroke,
                 TerminalSettings::get_global(cx).option_as_meta,
@@ -945,21 +948,21 @@ impl TerminalView {
     }
 
     fn focus_in(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal.update(cx, |terminal, _| {
+        self.terminal.update(cx, |terminal, model, _| {
             terminal.set_cursor_shape(self.cursor_shape);
             terminal.focus_in();
         });
-        self.blink_cursors(self.blink_epoch, cx);
+        self.blink_cursors(self.blink_epoch, model, cx);
         cx.invalidate_character_coordinates();
-        cx.notify();
+        model.notify(cx);
     }
 
     fn focus_out(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal.update(cx, |terminal, _| {
+        self.terminal.update(cx, |terminal, model, _| {
             terminal.focus_out();
             terminal.set_cursor_shape(CursorShape::Hollow);
         });
-        cx.notify();
+        model.notify(cx);
     }
 }
 
@@ -995,7 +998,7 @@ impl Render for TerminalView {
                 cx.listener(|this, event: &MouseDownEvent, cx| {
                     if !this.terminal.read(cx).mouse_mode(event.modifiers.shift) {
                         this.deploy_context_menu(event.position, cx);
-                        cx.notify();
+                        model.notify(cx);
                     }
                 }),
             )
@@ -1007,7 +1010,7 @@ impl Render for TerminalView {
                     self.workspace.clone(),
                     self.focus_handle.clone(),
                     focused,
-                    self.should_show_cursor(focused, cx),
+                    self.should_show_cursor(focused, model, cx),
                     self.can_navigate_to_selected_word,
                     self.block_below_cursor.clone(),
                 )),
@@ -1257,7 +1260,7 @@ impl SerializableItem for TerminalView {
                 })?
                 .await?;
             cx.update(|cx| {
-                cx.new_view(|cx| TerminalView::new(terminal, workspace, Some(workspace_id), cx))
+                cx.new_model(|model, cx| TerminalView::new(terminal, workspace, Some(workspace_id), model, cx))
             })
         })
     }
@@ -1278,13 +1281,13 @@ impl SearchableItem for TerminalView {
 
     /// Clear stored matches
     fn clear_matches(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        self.terminal().update(cx, |term, _| term.matches.clear())
+        self.terminal().update(cx, |term, model, _| term.matches.clear())
     }
 
     /// Store matches returned from find_matches somewhere for rendering
     fn update_matches(&mut self, matches: &[Self::Match], model: &Model<Self>, cx: &mut AppContext) {
         self.terminal()
-            .update(cx, |term, _| term.matches = matches.to_vec())
+            .update(cx, |term, model, _| term.matches = matches.to_vec())
     }
 
     /// Returns the selection content to pre-load into this search
@@ -1300,15 +1303,15 @@ impl SearchableItem for TerminalView {
     /// Focus match at given index into the Vec of matches
     fn activate_match(&mut self, index: usize, _: &[Self::Match], model: &Model<Self>, cx: &mut AppContext) {
         self.terminal()
-            .update(cx, |term, _| term.activate_match(index));
-        cx.notify();
+            .update(cx, |term, model, _| term.activate_match(index));
+        model.notify(cx);
     }
 
     /// Add selections for all matches given.
     fn select_matches(&mut self, matches: &[Self::Match], model: &Model<Self>, cx: &mut AppContext) {
         self.terminal()
-            .update(cx, |term, _| term.select_matches(matches));
-        cx.notify();
+            .update(cx, |term, model, _| term.select_matches(matches));
+        model.notify(cx);
     }
 
     /// Get all of the matches for this query, should be done on the background
@@ -1335,7 +1338,7 @@ impl SearchableItem for TerminalView {
 
         if let Some(s) = searcher {
             self.terminal()
-                .update(cx, |term, cx| term.find_matches(s, cx))
+                .update(cx, |term, model, cx| term.find_matches(s, model, cx))
         } else {
             Task::ready(vec![])
         }
@@ -1535,9 +1538,9 @@ mod tests {
             language::init(cx);
         });
 
-        let project = Project::test(params.fs.clone(), [], cx).await;
+        let project = Project::test(params.fs.clone(), [], model, cx).await;
         let workspace = cx
-            .add_window(|cx| Workspace::test_new(project.clone(), cx))
+            .add_window(|cx| Workspace::test_new(project.clone(), model, cx))
             .root_view(cx)
             .unwrap();
 
@@ -1569,14 +1572,14 @@ mod tests {
         cx: &mut TestAppContext,
     ) -> (Model<Worktree>, Entry) {
         let (wt, _) = project
-            .update(cx, |project, cx| {
-                project.find_or_create_worktree(path, true, cx)
+            .update(cx, |project, model, cx| {
+                project.find_or_create_worktree(path, true, model, cx)
             })
             .await
             .unwrap();
 
         let entry = cx
-            .update(|cx| wt.update(cx, |wt, cx| wt.create_entry(Path::new(""), is_dir, cx)))
+            .update(|cx| wt.update(cx, |wt, model, cx| wt.create_entry(Path::new(""), is_dir, model, cx)))
             .await
             .unwrap()
             .to_included()
@@ -1596,7 +1599,7 @@ mod tests {
                 worktree_id: wt.read(cx).id(),
                 path: entry.path,
             };
-            project.update(cx, |project, cx| project.set_active_path(Some(p), cx));
+            project.update(cx, |project, model, cx| project.set_active_path(Some(p), model, cx));
         });
     }
 

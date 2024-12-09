@@ -250,7 +250,7 @@ impl PickerDelegate for NewPathDelegate {
 
     fn set_selected_index(&mut self, ix: usize, model: &Model<picker>, cx: &mut AppContext) {
         self.selected_index = ix;
-        cx.notify();
+        model.notify(cx);
     }
 
     fn update_matches(
@@ -441,7 +441,7 @@ impl NewPathDelegate {
         matches: Vec<PathMatch>,
         model: &Model<Picker>, cx: &mut AppContext,
     ) {
-        cx.notify();
+        model.notify(cx);
         if query.is_empty() {
             self.matches = self
                 .project

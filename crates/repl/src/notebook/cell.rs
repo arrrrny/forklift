@@ -92,7 +92,7 @@ fn convert_outputs(
         .into_iter()
         .map(|output| match output {
             nbformat::v4::Output::Stream { text, .. } => Output::Stream {
-                content: cx.new_view(|cx| TerminalOutput::from(&text.0, cx)),
+                content: cx.new_model(|model, cx| TerminalOutput::from(&text.0, cx)),
             },
             nbformat::v4::Output::DisplayData(display_data) => {
                 Output::new(&display_data.data, None, cx)
@@ -103,7 +103,7 @@ fn convert_outputs(
             nbformat::v4::Output::Error(error) => Output::ErrorOutput(ErrorView {
                 ename: error.ename.clone(),
                 evalue: error.evalue.clone(),
-                traceback: cx.new_view(|cx| TerminalOutput::from(&error.traceback.join("\n"), cx)),
+                traceback: cx.new_model(|model, cx| TerminalOutput::from(&error.traceback.join("\n"), cx)),
             }),
         })
         .collect()
@@ -126,7 +126,7 @@ impl Cell {
             } => {
                 let source = source.join("");
 
-                let view = cx.new_view(|cx| {
+                let view = cx.new_model(|model, cx| {
                     let markdown_parsing_task = {
                         let languages = languages.clone();
                         let source = source.clone();
@@ -166,18 +166,19 @@ impl Cell {
                 execution_count,
                 source,
                 outputs,
-            } => Cell::Code(cx.new_view(|cx| {
+            } => Cell::Code(cx.new_model(|model, cx| {
                 let text = source.join("");
 
-                let buffer = cx.new_model(|cx| Buffer::local(text.clone(), cx));
-                let multi_buffer = cx.new_model(|cx| MultiBuffer::singleton(buffer.clone(), cx));
+                let buffer = cx.new_model(|model, cx| Buffer::local(text.clone(), cx));
+                let multi_buffer = cx.new_model(|model, cx| MultiBuffer::singleton(buffer.clone(), cx));
 
-                let editor_view = cx.new_view(|cx| {
+                let editor_view = cx.new_model(|model, cx| {
                     let mut editor = Editor::new(
                         EditorMode::AutoHeight { max_lines: 1024 },
                         multi_buffer,
                         None,
                         false,
+                        model,
                         cx,
                     );
 
@@ -224,7 +225,7 @@ impl Cell {
                 id,
                 metadata,
                 source,
-            } => Cell::Raw(cx.new_view(|_| RawCell {
+            } => Cell::Raw(cx.new_model(|_| RawCell {
                 id: id.clone(),
                 metadata: metadata.clone(),
                 source: source.join(""),

@@ -73,17 +73,17 @@ impl HeadlessProject {
         language_extension::init(proxy.clone(), languages.clone());
         languages::init(languages.clone(), node_runtime.clone(), cx);
 
-        let worktree_store = cx.new_model(|cx| {
+        let worktree_store = cx.new_model(|model, cx| {
             let mut store = WorktreeStore::local(true, fs.clone());
             store.shared(SSH_PROJECT_ID, session.clone().into(), cx);
             store
         });
-        let buffer_store = cx.new_model(|cx| {
+        let buffer_store = cx.new_model(|model, cx| {
             let mut buffer_store = BufferStore::local(worktree_store.clone(), cx);
             buffer_store.shared(SSH_PROJECT_ID, session.clone().into(), cx);
             buffer_store
         });
-        let prettier_store = cx.new_model(|cx| {
+        let prettier_store = cx.new_model(|model, cx| {
             PrettierStore::new(
                 node_runtime.clone(),
                 fs.clone(),
@@ -93,7 +93,7 @@ impl HeadlessProject {
             )
         });
         let environment = project::ProjectEnvironment::new(&worktree_store, None, cx);
-        let toolchain_store = cx.new_model(|cx| {
+        let toolchain_store = cx.new_model(|model, cx| {
             ToolchainStore::local(
                 languages.clone(),
                 worktree_store.clone(),
@@ -102,7 +102,7 @@ impl HeadlessProject {
             )
         });
 
-        let task_store = cx.new_model(|cx| {
+        let task_store = cx.new_model(|model, cx| {
             let mut task_store = TaskStore::local(
                 fs.clone(),
                 buffer_store.downgrade(),
@@ -114,7 +114,7 @@ impl HeadlessProject {
             task_store.shared(SSH_PROJECT_ID, session.clone().into(), cx);
             task_store
         });
-        let settings_observer = cx.new_model(|cx| {
+        let settings_observer = cx.new_model(|model, cx| {
             let mut observer = SettingsObserver::new_local(
                 fs.clone(),
                 worktree_store.clone(),
@@ -125,7 +125,7 @@ impl HeadlessProject {
             observer
         });
 
-        let lsp_store = cx.new_model(|cx| {
+        let lsp_store = cx.new_model(|model, cx| {
             let mut lsp_store = LspStore::new_local(
                 buffer_store.clone(),
                 worktree_store.clone(),
@@ -350,7 +350,7 @@ impl HeadlessProject {
             .await?;
 
         let response = this.update(&mut cx, |_, cx| {
-            worktree.update(cx, |worktree, _| proto::AddWorktreeResponse {
+            worktree.update(cx, |worktree, model, _| proto::AddWorktreeResponse {
                 worktree_id: worktree.id().to_proto(),
                 canonicalized_path: canonicalized.to_string_lossy().to_string(),
             })
@@ -370,7 +370,7 @@ impl HeadlessProject {
         // receiving a response to AddWorktree.
         cx.spawn(|mut cx| async move {
             this.update(&mut cx, |this, cx| {
-                this.worktree_store.update(cx, |worktree_store, cx| {
+                this.worktree_store.update(cx, |worktree_store, model, cx| {
                     worktree_store.add(&worktree, cx);
                 });
             })
@@ -388,7 +388,7 @@ impl HeadlessProject {
     ) -> Result<proto::Ack> {
         let worktree_id = WorktreeId::from_proto(envelope.payload.worktree_id);
         this.update(&mut cx, |this, cx| {
-            this.worktree_store.update(cx, |worktree_store, cx| {
+            this.worktree_store.update(cx, |worktree_store, model, cx| {
                 worktree_store.remove_worktree(worktree_id, cx);
             });
         })?;
@@ -403,7 +403,7 @@ impl HeadlessProject {
         let worktree_id = WorktreeId::from_proto(message.payload.worktree_id);
         let (buffer_store, buffer) = this.update(&mut cx, |this, cx| {
             let buffer_store = this.buffer_store.clone();
-            let buffer = this.buffer_store.update(cx, |buffer_store, cx| {
+            let buffer = this.buffer_store.update(cx, |buffer_store, model, cx| {
                 buffer_store.open_buffer(
                     ProjectPath {
                         worktree_id,
@@ -437,7 +437,7 @@ impl HeadlessProject {
             let buffer_store = this.buffer_store.clone();
             let buffer = this
                 .buffer_store
-                .update(cx, |buffer_store, cx| buffer_store.create_buffer(cx));
+                .update(cx, |buffer_store, model, cx| buffer_store.create_buffer(cx));
             anyhow::Ok((buffer_store, buffer))
         })??;
 
@@ -462,14 +462,14 @@ impl HeadlessProject {
         let settings_path = paths::settings_file();
         let (worktree, path) = this
             .update(&mut cx, |this, cx| {
-                this.worktree_store.update(cx, |worktree_store, cx| {
+                this.worktree_store.update(cx, |worktree_store, model, cx| {
                     worktree_store.find_or_create_worktree(settings_path, false, cx)
                 })
             })?
             .await?;
 
         let (buffer, buffer_store) = this.update(&mut cx, |this, cx| {
-            let buffer = this.buffer_store.update(cx, |buffer_store, cx| {
+            let buffer = this.buffer_store.update(cx, |buffer_store, model, cx| {
                 buffer_store.open_buffer(
                     ProjectPath {
                         worktree_id: worktree.read(cx).id(),
@@ -486,14 +486,14 @@ impl HeadlessProject {
 
         let buffer_id = cx.update(|cx| {
             if buffer.read(cx).is_empty() {
-                buffer.update(cx, |buffer, cx| {
+                buffer.update(cx, |buffer, model, cx| {
                     buffer.edit([(0..0, initial_server_settings_content())], None, cx)
                 });
             }
 
             let buffer_id = buffer.read_with(cx, |b, _| b.remote_id());
 
-            buffer_store.update(cx, |buffer_store, cx| {
+            buffer_store.update(cx, |buffer_store, model, cx| {
                 buffer_store
                     .create_buffer_for_peer(&buffer, SSH_PEER_ID, cx)
                     .detach_and_log_err(cx);
@@ -519,7 +519,7 @@ impl HeadlessProject {
                 .ok_or_else(|| anyhow!("missing query field"))?,
         )?;
         let mut results = this.update(&mut cx, |this, cx| {
-            this.buffer_store.update(cx, |buffer_store, cx| {
+            this.buffer_store.update(cx, |buffer_store, model, cx| {
                 buffer_store.find_search_candidates(&query, message.limit as _, this.fs.clone(), cx)
             })
         })?;

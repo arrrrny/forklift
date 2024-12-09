@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Context as _;
 use gpui::{
-    canvas, div, fill, img, opaque_grey, point, size, AnyElement, AppContext, Bounds, EventEmitter,
-    FocusHandle, FocusableView, InteractiveElement, IntoElement, Model, ObjectFit, ParentElement,
-    Render, Styled, Task, View, AppContext, VisualContext, WeakView,
+    canvas, div, fill, img, opaque_grey, point, size, AnyElement, AppContext, AppContext, Bounds,
+    EventEmitter, FocusHandle, FocusableView, InteractiveElement, IntoElement, Model, ObjectFit,
+    ParentElement, Render, Styled, Task, View, VisualContext, WeakView,
 };
 use persistence::IMAGE_VIEWER;
 use theme::Theme;
@@ -31,7 +31,8 @@ impl ImageView {
     pub fn new(
         image_item: Model<ImageItem>,
         project: Model<Project>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Self {
         cx.subscribe(&image_item, Self::on_image_event).detach();
         Self {
@@ -45,12 +46,13 @@ impl ImageView {
         &mut self,
         _: Model<ImageItem>,
         event: &ImageItemEvent,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) {
         match event {
             ImageItemEvent::FileHandleChanged | ImageItemEvent::Reloaded => {
                 cx.emit(ImageViewEvent::TitleChanged);
-                cx.notify();
+                model.notify(cx);
             }
             ImageItemEvent::ReloadNeeded => {}
         }
@@ -137,12 +139,13 @@ impl Item for ImageView {
     fn clone_on_split(
         &self,
         _workspace_id: Option<WorkspaceId>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Option<View<Self>>
     where
         Self: Sized,
     {
-        Some(cx.new_view(|cx| Self {
+        Some(cx.new_model(|model, cx| Self {
             image_item: self.image_item.clone(),
             project: self.project.clone(),
             focus_handle: cx.focus_handle(),
@@ -202,7 +205,7 @@ impl SerializableItem for ImageView {
                 .update(&mut cx, |project, cx| project.open_image(project_path, cx))?
                 .await?;
 
-            cx.update(|cx| Ok(cx.new_view(|cx| ImageView::new(image_item, project, cx))))?
+            cx.update(|cx| Ok(cx.new_model(|model, cx| ImageView::new(image_item, project, cx))))?
         })
     }
 
@@ -220,7 +223,8 @@ impl SerializableItem for ImageView {
         workspace: &mut Workspace,
         item_id: ItemId,
         _closing: bool,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Option<Task<gpui::Result<()>>> {
         let workspace_id = workspace.database_id()?;
         let image_path = self.image_item.read(cx).file.as_local()?.abs_path(cx);
@@ -324,7 +328,8 @@ impl ProjectItem for ImageView {
     fn for_project_item(
         project: Model<Project>,
         item: Model<Self::Item>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Self
     where
         Self: Sized,

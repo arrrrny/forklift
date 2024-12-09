@@ -2065,7 +2065,7 @@ mod tests {
                 async { Ok(()) }
             },
         );
-        model.update(cx, |model, _| {
+        model.update(cx, |model, model, _| {
             model.subscription = Some(subscription);
         });
         server.send(proto::Ping {});

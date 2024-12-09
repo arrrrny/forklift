@@ -252,7 +252,7 @@ impl<M: FocusableView + EventEmitter<DismissEvent> + Render> Element for RightCl
                             let window = window.handle();
                             move |modal, _: &DismissEvent, cx| {
                                 window
-                                    .update(cx, |window, cx| {
+                                    .update(cx, |window, model, cx| {
                                         if modal.focus_handle(cx).contains_focused(window) {
                                             if let Some(previous_focus_handle) =
                                                 previous_focus_handle.as_ref()

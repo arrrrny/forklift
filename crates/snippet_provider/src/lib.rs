@@ -146,7 +146,7 @@ impl GlobalSnippetWatcher {
             snippets: Default::default(),
             watch_tasks: vec![],
         });
-        provider.update(cx, |this, cx| {
+        provider.update(cx, |this, model, cx| {
             this.watch_directory(&global_snippets_dir, cx)
         });
         Self(provider)

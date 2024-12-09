@@ -19,7 +19,8 @@ impl ThreadHistory {
     pub(crate) fn new(
         assistant_panel: WeakView<AssistantPanel>,
         thread_store: Model<ThreadStore>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
@@ -38,7 +39,9 @@ impl FocusableView for ThreadHistory {
 
 impl Render for ThreadHistory {
     fn render(&mut self, model: &Model<Self>, cx: &mut AppContext) -> impl IntoElement {
-        let threads = self.thread_store.update(cx, |this, cx| this.threads(cx));
+        let threads = self
+            .thread_store
+            .update(cx, |this, model, cx| this.threads(cx));
 
         v_flex()
             .id("thread-history-container")
@@ -113,7 +116,7 @@ impl RenderOnce for PastThread {
                 .unwrap(),
             OffsetDateTime::now_utc(),
             self.assistant_panel
-                .update(cx, |this, _cx| this.local_timezone())
+                .update(cx, |this, model, _cx| this.local_timezone())
                 .unwrap_or(UtcOffset::UTC),
             time_format::TimestampFormat::EnhancedAbsolute,
         );
@@ -133,7 +136,7 @@ impl RenderOnce for PastThread {
                                 let id = id.clone();
                                 move |_event, cx| {
                                     assistant_panel
-                                        .update(cx, |this, cx| {
+                                        .update(cx, |this, model, cx| {
                                             this.delete_thread(&id, cx);
                                         })
                                         .ok();
@@ -146,7 +149,7 @@ impl RenderOnce for PastThread {
                 let id = id.clone();
                 move |_event, cx| {
                     assistant_panel
-                        .update(cx, |this, cx| {
+                        .update(cx, |this, model, cx| {
                             this.open_thread(&id, cx);
                         })
                         .ok();

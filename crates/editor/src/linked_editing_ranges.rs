@@ -157,7 +157,7 @@ pub(super) fn refresh_linked_ranges(
                     values.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0, &snapshot));
                 }
 
-                cx.notify();
+                model.notify(cx);
             })
             .ok()?;
 

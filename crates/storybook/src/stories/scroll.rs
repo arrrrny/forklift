@@ -6,7 +6,7 @@ pub struct ScrollStory;
 
 impl ScrollStory {
     pub fn view(window: &mut gpui::Window, cx: &mut gpui::AppContext) -> View<ScrollStory> {
-        cx.new_view(|_cx| ScrollStory)
+        cx.new_model(|_cx| ScrollStory)
     }
 }
 

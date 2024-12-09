@@ -77,7 +77,7 @@ impl FollowableItem for Editor {
             .iter()
             .map(|excerpt| excerpt.buffer_id)
             .collect::<HashSet<_>>();
-        let buffers = project.update(cx, |project, cx| {
+        let buffers = project.update(cx, |project, model, cx| {
             buffer_ids
                 .iter()
                 .map(|id| BufferId::new(*id).map(|id| project.open_buffer_by_id(id, cx)))
@@ -90,7 +90,7 @@ impl FollowableItem for Editor {
                 .debug_assert_ok("leaders don't share views for unshared buffers")?;
 
             let editor = cx.update(|cx| {
-                let multibuffer = cx.new_model(|cx| {
+                let multibuffer = cx.new_model(|model, cx| {
                     let mut multibuffer;
                     if state.singleton && buffers.len() == 1 {
                         multibuffer = MultiBuffer::singleton(buffers.pop().unwrap(), cx)
@@ -112,6 +112,7 @@ impl FollowableItem for Editor {
                                 multibuffer.push_excerpts(
                                     buffer.clone(),
                                     buffer_excerpts.filter_map(deserialize_excerpt_range),
+                                    model,
                                     cx,
                                 );
                             }
@@ -125,7 +126,7 @@ impl FollowableItem for Editor {
                     multibuffer
                 });
 
-                cx.new_view(|cx| {
+                cx.new_model(|model, cx| {
                     let mut editor =
                         Editor::for_multibuffer(multibuffer, Some(project.clone()), true, cx);
                     editor.remote_id = Some(remote_id);
@@ -155,11 +156,11 @@ impl FollowableItem for Editor {
     fn set_leader_peer_id(&mut self, leader_peer_id: Option<PeerId>, model: &Model<Self>, cx: &mut AppContext) {
         self.leader_peer_id = leader_peer_id;
         if self.leader_peer_id.is_some() {
-            self.buffer.update(cx, |buffer, cx| {
+            self.buffer.update(cx, |buffer, model, cx| {
                 buffer.remove_active_selections(cx);
             });
         } else if self.focus_handle.is_focused(cx) {
-            self.buffer.update(cx, |buffer, cx| {
+            self.buffer.update(cx, |buffer, model, cx| {
                 buffer.set_active_selections(
                     &self.selections.disjoint_anchors(),
                     self.selections.line_mode,
@@ -168,7 +169,7 @@ impl FollowableItem for Editor {
                 );
             });
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     fn to_state_proto(&self, window: &Window, cx: &AppContext) -> Option<proto::view::Variant> {
@@ -343,7 +344,7 @@ async fn update_editor_from_message(
         .iter()
         .filter_map(|insertion| Some(insertion.excerpt.as_ref()?.buffer_id))
         .collect::<HashSet<_>>();
-    let inserted_excerpt_buffers = project.update(cx, |project, cx| {
+    let inserted_excerpt_buffers = project.update(cx, |project, model, cx| {
         inserted_excerpt_buffer_ids
             .into_iter()
             .map(|id| BufferId::new(id).map(|id| project.open_buffer_by_id(id, cx)))
@@ -352,8 +353,8 @@ async fn update_editor_from_message(
     let _inserted_excerpt_buffers = try_join_all(inserted_excerpt_buffers).await?;
 
     // Update the editor's excerpts.
-    this.update(cx, |editor, cx| {
-        editor.buffer.update(cx, |multibuffer, cx| {
+    this.update(cx, |editor, model, cx| {
+        editor.buffer.update(cx, |multibuffer, model, cx| {
             let mut removed_excerpt_ids = message
                 .deleted_excerpts
                 .into_iter()
@@ -410,7 +411,7 @@ async fn update_editor_from_message(
     })??;
 
     // Deserialize the editor state.
-    let (selections, pending_selection, scroll_top_anchor) = this.update(cx, |editor, cx| {
+    let (selections, pending_selection, scroll_top_anchor) = this.update(cx, |editor, model, cx| {
         let buffer = editor.buffer.read(cx).read(cx);
         let selections = message
             .selections
@@ -428,8 +429,8 @@ async fn update_editor_from_message(
 
     // Wait until the buffer has received all of the operations referenced by
     // the editor's new state.
-    this.update(cx, |editor, cx| {
-        editor.buffer.update(cx, |buffer, cx| {
+    this.update(cx, |editor, model, cx| {
+        editor.buffer.update(cx, |buffer, model, cx| {
             buffer.wait_for_anchors(
                 selections
                     .iter()
@@ -443,7 +444,7 @@ async fn update_editor_from_message(
     .await?;
 
     // Update the editor's state.
-    this.update(cx, |editor, cx| {
+    this.update(cx, |editor, model, cx| {
         if !selections.is_empty() || pending_selection.is_some() {
             editor.set_selections_from_remote(selections, pending_selection, cx);
             editor.request_autoscroll_remotely(Autoscroll::newest(), cx);
@@ -692,7 +693,7 @@ impl Item for Editor {
     where
         Self: Sized,
     {
-        Some(cx.new_view(|cx| self.clone(cx)))
+        Some(cx.new_model(|model, cx| self.clone(cx)))
     }
 
     fn set_nav_history(&mut self, history: ItemNavHistory, _: &Model<Self>, _: &mut AppContext) {
@@ -701,7 +702,7 @@ impl Item for Editor {
 
     fn discarded(&self, _project: Model<Project>, model: &Model<Self>, cx: &mut AppContext) {
         for buffer in self.buffer().clone().read(cx).all_buffers() {
-            buffer.update(cx, |buffer, cx| buffer.discarded(cx))
+            buffer.update(cx, |buffer, model, cx| buffer.discarded(cx))
         }
     }
 
@@ -815,14 +816,14 @@ impl Item for Editor {
             .map(|a| a.to_string_lossy().to_string());
         self.report_editor_event("save", file_extension, cx);
 
-        project.update(cx, |project, cx| project.save_buffer_as(buffer, path, cx))
+        project.update(cx, |project, model, cx| project.save_buffer_as(buffer, path, cx))
     }
 
     fn reload(&mut self, project: Model<Project>, model: &Model<Self>, cx: &mut AppContext) -> Task<Result<()>> {
         let buffer = self.buffer().clone();
         let buffers = self.buffer.read(cx).all_buffers();
         let reload_buffers =
-            project.update(cx, |project, cx| project.reload_buffers(buffers, true, cx));
+            project.update(cx, |project, model, cx| project.reload_buffers(buffers, true, cx));
         cx.spawn(|this, mut cx| async move {
             let transaction = reload_buffers.log_err().await;
             this.update(&mut cx, |editor, cx| {
@@ -1030,7 +1031,7 @@ impl SerializableItem for Editor {
                     })?;
 
                     cx.update(|cx| {
-                        cx.new_view(|cx| {
+                        cx.new_model(|model, cx| {
                             let mut editor = Editor::for_buffer(buffer, Some(project), cx);
 
                             editor.read_scroll_position_from_db(item_id, workspace_id, cx);
@@ -1045,7 +1046,7 @@ impl SerializableItem for Editor {
                 mtime,
                 ..
             } => {
-                let project_item = project.update(cx, |project, cx| {
+                let project_item = project.update(cx, |project, model, cx| {
                     let (worktree, path) = project.find_worktree(&abs_path, cx)?;
                     let project_path = ProjectPath {
                         worktree_id: worktree.read(cx).id(),
@@ -1084,7 +1085,7 @@ impl SerializableItem for Editor {
                             }
 
                             cx.update(|cx| {
-                                cx.new_view(|cx| {
+                                cx.new_model(|model, cx| {
                                     let mut editor = Editor::for_buffer(buffer, Some(project), cx);
 
                                     editor.read_scroll_position_from_db(item_id, workspace_id, cx);
@@ -1094,7 +1095,7 @@ impl SerializableItem for Editor {
                         })
                     }
                     None => {
-                        let open_by_abs_path = workspace.update(cx, |workspace, cx| {
+                        let open_by_abs_path = workspace.update(cx, |workspace, model, cx| {
                             workspace.open_abs_path(abs_path.clone(), false, cx)
                         });
                         cx.spawn(|mut cx| async move {
@@ -1654,14 +1655,15 @@ mod tests {
         cx: &mut VisualTestContext,
     ) -> View<Editor> {
         workspace
-            .update(cx, |workspace, cx| {
+            .update(cx, |workspace, model, cx| {
                 let pane = workspace.active_pane();
-                pane.update(cx, |_, cx| {
+                pane.update(cx, |_, model, cx| {
                     Editor::deserialize(
                         project.clone(),
                         workspace.weak_handle(),
                         workspace_id,
                         item_id,
+                        model,
                         cx,
                     )
                 })
@@ -1718,7 +1720,7 @@ mod tests {
             let deserialized =
                 deserialize_editor(item_id, workspace_id, workspace, project, cx).await;
 
-            deserialized.update(cx, |editor, cx| {
+            deserialized.update(cx, |editor, model, cx| {
                 assert_eq!(editor.text(cx), "fn main() {}");
                 assert!(editor.is_dirty(cx));
                 assert!(!editor.has_conflict(cx));
@@ -1749,7 +1751,7 @@ mod tests {
             let deserialized =
                 deserialize_editor(item_id, workspace_id, workspace, project, cx).await;
 
-            deserialized.update(cx, |editor, cx| {
+            deserialized.update(cx, |editor, model, cx| {
                 assert_eq!(editor.text(cx), ""); // The file should be empty as per our initial setup
                 assert!(!editor.is_dirty(cx));
                 assert!(!editor.has_conflict(cx));
@@ -1763,7 +1765,7 @@ mod tests {
         {
             let project = Project::test(fs.clone(), ["/file.rs".as_ref()], cx).await;
             // Add Rust to the language, so that we can restore the language of the buffer
-            project.update(cx, |project, _| project.languages().add(rust_language()));
+            project.update(cx, |project, model, _| project.languages().add(rust_language()));
 
             let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
 
@@ -1784,7 +1786,7 @@ mod tests {
             let deserialized =
                 deserialize_editor(item_id, workspace_id, workspace, project, cx).await;
 
-            deserialized.update(cx, |editor, cx| {
+            deserialized.update(cx, |editor, model, cx| {
                 assert_eq!(editor.text(cx), "hello");
                 assert!(editor.is_dirty(cx)); // The editor should be dirty for an untitled buffer
 
@@ -1820,7 +1822,7 @@ mod tests {
             let deserialized =
                 deserialize_editor(item_id, workspace_id, workspace, project, cx).await;
 
-            deserialized.update(cx, |editor, cx| {
+            deserialized.update(cx, |editor, model, cx| {
                 assert_eq!(editor.text(cx), "fn main() {}");
                 assert!(editor.has_conflict(cx)); // The editor should have a conflict
             });

@@ -482,7 +482,7 @@ impl SettingsObserver {
             let settings_contents: Vec<(Arc<Path>, _, _)> =
                 futures::future::join_all(settings_contents).await;
             cx.update(|cx| {
-                this.update(cx, |this, cx| {
+                this.update(cx, |this, model, cx| {
                     this.update_settings(
                         worktree,
                         settings_contents.into_iter().map(|(path, kind, content)| {
@@ -538,7 +538,7 @@ impl SettingsObserver {
                             }
                         }
                     }),
-                LocalSettingsKind::Tasks => task_store.update(cx, |task_store, cx| {
+                LocalSettingsKind::Tasks => task_store.update(cx, |task_store, model, cx| {
                     task_store
                         .update_user_tasks(
                             Some(SettingsLocation {

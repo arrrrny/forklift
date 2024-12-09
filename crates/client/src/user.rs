@@ -205,7 +205,7 @@ impl UserStore {
                                             staff,
                                         );
 
-                                        this.update(cx, |this, _| {
+                                        this.update(cx, |this, model, _| {
                                             this.set_current_user_accepted_tos_at(
                                                 info.accepted_tos_at,
                                             );
@@ -217,20 +217,20 @@ impl UserStore {
 
                                 current_user_tx.send(user).await.ok();
 
-                                this.update(&mut cx, |_, cx| cx.notify())?;
+                                this.update(&mut cx, |_, cx| model.notify(cx))?;
                             }
                         }
                         Status::SignedOut => {
                             current_user_tx.send(None).await.ok();
                             this.update(&mut cx, |this, cx| {
-                                cx.notify();
+                                model.notify(cx);
                                 this.clear_contacts()
                             })?
                             .await;
                         }
                         Status::ConnectionLost => {
                             this.update(&mut cx, |this, cx| {
-                                cx.notify();
+                                model.notify(cx);
                                 this.clear_contacts()
                             })?
                             .await;
@@ -261,7 +261,7 @@ impl UserStore {
                 url: Arc::from(message.payload.url),
                 count: message.payload.count,
             });
-            cx.notify();
+            model.notify(cx);
         })?;
         Ok(())
     }
@@ -299,7 +299,7 @@ impl UserStore {
     ) -> Result<()> {
         this.update(&mut cx, |this, cx| {
             this.current_plan = Some(message.payload.plan());
-            cx.notify();
+            model.notify(cx);
         })?;
         Ok(())
     }
@@ -330,7 +330,7 @@ impl UserStore {
                 user_ids.extend(message.incoming_requests.iter().map(|req| req.requester_id));
                 user_ids.extend(message.outgoing_requests.iter());
 
-                let load_users = self.get_users(user_ids.into_iter().collect(), cx);
+                let load_users = self.get_users(user_ids.into_iter().collect(), model, cx);
                 cx.spawn(|this, mut cx| async move {
                     load_users.await?;
 
@@ -425,7 +425,7 @@ impl UserStore {
                             }
                         }
 
-                        cx.notify();
+                        model.notify(cx);
                     })?;
 
                     Ok(())
@@ -486,7 +486,12 @@ impl UserStore {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) -> Task<Result<()>> {
-        self.perform_contact_request(responder_id, proto::RequestContact { responder_id }, cx)
+        self.perform_contact_request(
+            responder_id,
+            proto::RequestContact { responder_id },
+            model,
+            cx,
+        )
     }
 
     pub fn remove_contact(
@@ -495,7 +500,7 @@ impl UserStore {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) -> Task<Result<()>> {
-        self.perform_contact_request(user_id, proto::RemoveContact { user_id }, cx)
+        self.perform_contact_request(user_id, proto::RemoveContact { user_id }, model, cx)
     }
 
     pub fn has_incoming_contact_request(&self, user_id: u64) -> bool {
@@ -553,7 +558,7 @@ impl UserStore {
     ) -> Task<Result<()>> {
         let client = self.client.upgrade();
         *self.pending_contact_requests.entry(user_id).or_insert(0) += 1;
-        cx.notify();
+        model.notify(cx);
 
         cx.spawn(move |this, mut cx| async move {
             let response = client
@@ -569,7 +574,7 @@ impl UserStore {
                         request_count.remove();
                     }
                 }
-                cx.notify();
+                model.notify(cx);
             })?;
             response?;
             Ok(())
@@ -638,7 +643,7 @@ impl UserStore {
         model: &Model<Self>,
         cx: &AppContext,
     ) -> Task<Result<Vec<Arc<User>>>> {
-        self.load_users(proto::FuzzySearchUsers { query }, cx)
+        self.load_users(proto::FuzzySearchUsers { query }, model, cx)
     }
 
     pub fn get_cached_user(&self, user_id: u64) -> Option<Arc<User>> {
@@ -655,7 +660,7 @@ impl UserStore {
             return Some(user);
         }
 
-        self.get_user(user_id, cx).detach_and_log_err(cx);
+        self.get_user(user_id, model, cx).detach_and_log_err(cx);
         None
     }
 
@@ -669,7 +674,7 @@ impl UserStore {
             return Task::ready(Ok(user));
         }
 
-        let load_users = self.get_users(vec![user_id], cx);
+        let load_users = self.get_users(vec![user_id], model, cx);
         cx.spawn(move |this, mut cx| async move {
             load_users.await?;
             this.update(&mut cx, |this, _| {
@@ -830,8 +835,8 @@ impl Contact {
         cx: &mut AsyncAppContext,
     ) -> Result<Self> {
         let user = user_store
-            .update(cx, |user_store, cx| {
-                user_store.get_user(contact.user_id, cx)
+            .update(cx, |user_store, model, cx| {
+                user_store.get_user(contact.user_id, model, cx)
             })?
             .await?;
         Ok(Self {

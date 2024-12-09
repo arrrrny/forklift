@@ -45,7 +45,7 @@ impl BranchList {
     }
 
     fn new(delegate: BranchListDelegate, rem_width: f32, model: &Model<Self>, cx: &mut AppContext) -> Self {
-        let picker = cx.new_view(|cx| Picker::uniform_list(delegate, cx));
+        let picker = cx.new_model(|model, cx| Picker::uniform_list(delegate, cx));
         let _subscription = cx.subscribe(&picker, |_, _, _, cx| cx.emit(DismissEvent));
         Self {
             picker,
@@ -69,7 +69,7 @@ impl Render for BranchList {
             .w(rems(self.rem_width))
             .child(self.picker.clone())
             .on_mouse_down_out(cx.listener(|this, _, cx| {
-                this.picker.update(cx, |this, cx| {
+                this.picker.update(cx, |this, model, cx| {
                     this.cancel(&Default::default(), cx);
                 })
             }))

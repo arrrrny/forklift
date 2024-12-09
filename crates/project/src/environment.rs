@@ -25,7 +25,7 @@ impl ProjectEnvironment {
         cli_environment: Option<HashMap<String, String>>,
         cx: &mut AppContext,
     ) -> Model<Self> {
-        cx.new_model(|cx| {
+        cx.new_model(|model, cx| {
             cx.subscribe(worktree_store, |this: &mut Self, _, event, _| {
                 if let WorktreeStoreEvent::WorktreeRemoved(_, id) = event {
                     this.remove_worktree_environment(*id);

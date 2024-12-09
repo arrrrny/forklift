@@ -24,7 +24,7 @@ fn toggle_screen_sharing(
     let call = ActiveCall::global(cx).read(cx);
     if let Some(room) = call.room().cloned() {
         let client = call.client();
-        let toggle_screen_sharing = room.update(cx, |room, cx| {
+        let toggle_screen_sharing = room.update(cx, |room, model, cx| {
             if room.is_screen_sharing() {
                 report_call_event_for_room(
                     "disable screen share",
@@ -51,7 +51,7 @@ fn toggle_mute(_: &ToggleMute, cx: &mut AppContext) {
     let call = ActiveCall::global(cx).read(cx);
     if let Some(room) = call.room().cloned() {
         let client = call.client();
-        room.update(cx, |room, cx| {
+        room.update(cx, |room, model, cx| {
             let operation = if room.is_muted() {
                 "enable microphone"
             } else {
@@ -66,7 +66,7 @@ fn toggle_mute(_: &ToggleMute, cx: &mut AppContext) {
 
 fn toggle_deafen(_: &ToggleDeafen, cx: &mut AppContext) {
     if let Some(room) = ActiveCall::global(cx).read(cx).room().cloned() {
-        room.update(cx, |room, cx| room.toggle_deafen(cx));
+        room.update(cx, |room, model, cx| room.toggle_deafen(cx));
     }
 }
 
@@ -175,7 +175,7 @@ impl TitleBar {
                                     let peer_id = collaborator.peer_id;
                                     cx.listener(move |this, _, cx| {
                                         this.workspace
-                                            .update(cx, |workspace, cx| {
+                                            .update(cx, |workspace, model, cx| {
                                                 if is_following {
                                                     workspace.unfollow(peer_id, cx);
                                                 } else {
@@ -297,7 +297,7 @@ impl TitleBar {
 
         let is_connecting_to_project = self
             .workspace
-            .update(cx, |workspace, cx| workspace.has_active_modal(cx))
+            .update(cx, |workspace, model, cx| workspace.has_active_modal(cx))
             .unwrap_or(false);
 
         let room = room.read(cx);
@@ -357,7 +357,7 @@ impl TitleBar {
                         .icon_size(IconSize::Small)
                         .on_click(move |_, cx| {
                             ActiveCall::global(cx)
-                                .update(cx, |call, cx| call.hang_up(cx))
+                                .update(cx, |call, model, cx| call.hang_up(cx))
                                 .detach_and_log_err(cx);
                         }),
                 )

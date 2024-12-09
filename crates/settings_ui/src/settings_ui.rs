@@ -64,8 +64,12 @@ pub struct SettingsPage {
 }
 
 impl SettingsPage {
-    pub fn new(_workspace: &Workspace, model: &Model<Workspace>, cx: &mut AppContext) -> View<Self> {
-        cx.new_view(|cx| Self {
+    pub fn new(
+        _workspace: &Workspace,
+        model: &Model<Workspace>,
+        cx: &mut AppContext,
+    ) -> View<Self> {
+        cx.new_model(|model, cx| Self {
             focus_handle: cx.focus_handle(),
         })
     }

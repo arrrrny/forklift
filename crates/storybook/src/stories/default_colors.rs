@@ -7,7 +7,7 @@ pub struct DefaultColorsStory;
 
 impl DefaultColorsStory {
     pub fn view(window: &mut gpui::Window, cx: &mut gpui::AppContext) -> View<Self> {
-        cx.new_view(|_cx| Self)
+        cx.new_model(|_cx| Self)
     }
 }
 

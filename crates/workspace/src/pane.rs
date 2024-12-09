@@ -410,7 +410,7 @@ impl Pane {
                 pane: handle.clone(),
                 next_timestamp,
             }))),
-            toolbar: cx.new_view(|_| Toolbar::new()),
+            toolbar: cx.new_model(|_| Toolbar::new()),
             tab_bar_scroll_handle: ScrollHandle::new(),
             drag_split_direction: None,
             workspace,
@@ -438,7 +438,7 @@ impl Pane {
                             .anchor(AnchorCorner::TopRight)
                             .with_handle(pane.new_item_context_menu_handle.clone())
                             .menu(move |cx| {
-                                Some(ContextMenu::build(cx, |menu, _| {
+                                Some(ContextMenu::build(model, window, cx|menu, _| {
                                     menu.action("New File", NewFile.boxed_clone())
                                         .action(
                                             "Open File",
@@ -471,7 +471,7 @@ impl Pane {
                             .anchor(AnchorCorner::TopRight)
                             .with_handle(pane.split_item_context_menu_handle.clone())
                             .menu(move |cx| {
-                                ContextMenu::build(cx, |menu, _| {
+                                ContextMenu::build(cx, window, |menu, model, window, cx| {
                                     menu.action("Split Right", SplitRight.boxed_clone())
                                         .action("Split Left", SplitLeft.boxed_clone())
                                         .action("Split Up", SplitUp.boxed_clone())
@@ -493,6 +493,7 @@ impl Pane {
                                 Tooltip::for_action(
                                     if zoomed { "Zoom Out" } else { "Zoom In" },
                                     &ToggleZoom,
+                                    model,
                                     cx,
                                 )
                             })
@@ -563,10 +564,10 @@ impl Pane {
         if !self.was_focused {
             self.was_focused = true;
             cx.emit(Event::Focus);
-            cx.notify();
+            model.notify(cx);
         }
 
-        self.toolbar.update(cx, |toolbar, cx| {
+        self.toolbar.update(cx, |toolbar, model, cx| {
             toolbar.focus_changed(true, cx);
         });
 
@@ -600,10 +601,10 @@ impl Pane {
 
     fn focus_out(&mut self, _event: FocusOutEvent, model: &Model<Self>, cx: &mut AppContext) {
         self.was_focused = false;
-        self.toolbar.update(cx, |toolbar, cx| {
+        self.toolbar.update(cx, |toolbar, model, cx| {
             toolbar.focus_changed(false, cx);
         });
-        cx.notify();
+        model.notify(cx);
     }
 
     fn project_events(
@@ -617,7 +618,7 @@ impl Pane {
             | project::Event::DiagnosticsUpdated { .. } => {
                 if ItemSettings::get_global(cx).show_diagnostics != ShowDiagnostics::Off {
                     this.update_diagnostics(cx);
-                    cx.notify();
+                    model.notify(cx);
                 }
             }
             _ => {}
@@ -655,7 +656,7 @@ impl Pane {
             self.preview_item_id = None;
         }
         self.update_diagnostics(cx);
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn active_item_index(&self) -> usize {
@@ -683,10 +684,10 @@ impl Pane {
     }
 
     pub fn set_can_navigate(&mut self, can_navigate: bool, model: &Model<Self>, cx: &mut AppContext) {
-        self.toolbar.update(cx, |toolbar, cx| {
+        self.toolbar.update(cx, |toolbar, model, cx| {
             toolbar.set_can_navigate(can_navigate, cx);
         });
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn set_render_tab_bar_buttons<F>(&mut self, model: &Model<Self>, cx: &mut AppContext, render: F)
@@ -695,7 +696,7 @@ impl Pane {
             + Fn(&mut Pane, &Model<Pane>, &mut AppContext) -> (Option<AnyElement>, Option<AnyElement>),
     {
         self.render_tab_bar_buttons = Rc::new(render);
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn set_custom_drop_handle<F>(&mut self, model: &Model<Self>, cx: &mut AppContext, handle: F)
@@ -703,7 +704,7 @@ impl Pane {
         F: 'static + Fn(&mut Pane, &dyn Any, &Model<Pane>, &mut AppContext) -> ControlFlow<(), ()>,
     {
         self.custom_drop_handle = Some(Arc::new(handle));
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn nav_history_for_item<T: Item>(&self, item: &View<T>) -> ItemNavHistory {
@@ -742,7 +743,7 @@ impl Pane {
         if let Some(workspace) = self.workspace.upgrade() {
             let pane = cx.view().downgrade();
             cx.window_context().defer(move |cx| {
-                workspace.update(cx, |workspace, cx| {
+                workspace.update(cx, |workspace, model, cx| {
                     workspace.go_back(pane, cx).detach_and_log_err(cx)
                 })
             })
@@ -753,7 +754,7 @@ impl Pane {
         if let Some(workspace) = self.workspace.upgrade() {
             let pane = cx.view().downgrade();
             cx.window_context().defer(move |cx| {
-                workspace.update(cx, |workspace, cx| {
+                workspace.update(cx, |workspace, model, cx| {
                     workspace.go_forward(pane, cx).detach_and_log_err(cx)
                 })
             })
@@ -769,7 +770,7 @@ impl Pane {
     }
 
     fn history_updated(&mut self, model: &Model<Self>, cx: &mut AppContext) {
-        self.toolbar.update(cx, |_, cx| cx.notify());
+        self.toolbar.update(cx, |_, model, cx| model.notify(cx));
     }
 
     pub fn preview_item_id(&self) -> Option<EntityId> {
@@ -973,7 +974,7 @@ impl Pane {
                     }
                 }
 
-                cx.notify();
+                model.notify(cx);
             }
 
             self.activate_item(insertion_index, activate_pane, focus_item, cx);
@@ -987,7 +988,7 @@ impl Pane {
             }
 
             self.activate_item(insertion_index, activate_pane, focus_item, cx);
-            cx.notify();
+            model.notify(cx);
         }
 
         cx.emit(Event::AddItem { item });
@@ -1114,7 +1115,7 @@ impl Pane {
                     .scroll_to_item(index - self.pinned_tab_count);
             }
 
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -1445,7 +1446,8 @@ impl Pane {
                         item_ix,
                         &*item_to_close,
                         save_intent,
-                        &mut cx,
+                        model,&mut
+                        cx,
                     )
                     .await?
                 {
@@ -1459,7 +1461,7 @@ impl Pane {
                 .ok();
             }
 
-            pane.update(&mut cx, |_, cx| cx.notify()).ok();
+            pane.update(&mut cx, |_, cx| model.notify(cx)).ok();
             Ok(())
         })
     }
@@ -1595,7 +1597,7 @@ impl Pane {
             cx.emit(Event::ZoomOut);
         }
 
-        cx.notify();
+        model.notify(cx);
     }
 
     pub async fn save_item(
@@ -1649,7 +1651,7 @@ impl Pane {
 
         if has_conflict && can_save {
             if has_deleted_file && is_singleton {
-                let answer = pane.update(cx, |pane, cx| {
+                let answer = pane.update(cx, |pane, model, cx| {
                     pane.activate_item(item_ix, true, true, cx);
                     cx.prompt(
                         PromptLevel::Warning,
@@ -1660,11 +1662,11 @@ impl Pane {
                 })?;
                 match answer.await {
                     Ok(0) => {
-                        pane.update(cx, |_, cx| item.save(should_format, project, cx))?
+                        pane.update(cx, |_, model, cx| item.save(should_format, project, cx))?
                             .await?
                     }
                     Ok(1) => {
-                        pane.update(cx, |pane, cx| {
+                        pane.update(cx, |pane, model, cx| {
                             pane.remove_item(item.item_id(), false, false, cx)
                         })?;
                     }
@@ -1672,7 +1674,7 @@ impl Pane {
                 }
                 return Ok(true);
             } else {
-                let answer = pane.update(cx, |pane, cx| {
+                let answer = pane.update(cx, |pane, model, cx| {
                     pane.activate_item(item_ix, true, true, cx);
                     cx.prompt(
                         PromptLevel::Warning,
@@ -1683,10 +1685,10 @@ impl Pane {
                 })?;
                 match answer.await {
                     Ok(0) => {
-                        pane.update(cx, |_, cx| item.save(should_format, project, cx))?
+                        pane.update(cx, |_, model, cx| item.save(should_format, project, cx))?
                             .await?
                     }
-                    Ok(1) => pane.update(cx, |_, cx| item.reload(project, cx))?.await?,
+                    Ok(1) => pane.update(cx, |_, model, cx| item.reload(project, cx))?.await?,
                     _ => return Ok(false),
                 }
             }
@@ -1700,7 +1702,7 @@ impl Pane {
                 })?;
                 if !will_autosave {
                     let item_id = item.item_id();
-                    let answer_task = pane.update(cx, |pane, cx| {
+                    let answer_task = pane.update(cx, |pane, model, cx| {
                         if pane.save_modals_spawned.insert(item_id) {
                             pane.activate_item(item_ix, true, true, cx);
                             let prompt = dirty_message_for(item.project_path(cx));
@@ -1716,7 +1718,7 @@ impl Pane {
                     })?;
                     if let Some(answer_task) = answer_task {
                         let answer = answer_task.await;
-                        pane.update(cx, |pane, _| {
+                        pane.update(cx, |pane, model, _| {
                             if !pane.save_modals_spawned.remove(&item_id) {
                                 debug_panic!(
                                     "save modal was not present in spawned modals after awaiting for its answer"
@@ -1727,7 +1729,7 @@ impl Pane {
                             Ok(0) => {}
                             Ok(1) => {
                                 // Don't save this file
-                                pane.update(cx, |pane, cx| {
+                                pane.update(cx, |pane, model, cx| {
                                     if pane.is_tab_pinned(item_ix) && !item.can_save(cx) {
                                         pane.pinned_tab_count -= 1;
                                     }
@@ -1745,7 +1747,7 @@ impl Pane {
             }
 
             if can_save {
-                pane.update(cx, |pane, cx| {
+                pane.update(cx, |pane, model, cx| {
                     if pane.is_active_preview_item(item.item_id()) {
                         pane.set_preview_item_id(None, cx);
                     }
@@ -1753,12 +1755,12 @@ impl Pane {
                 })?
                 .await?;
             } else if can_save_as {
-                let abs_path = pane.update(cx, |pane, cx| {
+                let abs_path = pane.update(cx, |pane, model, cx| {
                     pane.workspace
-                        .update(cx, |workspace, cx| workspace.prompt_for_new_path(cx))
+                        .update(cx, |workspace, model, cx| workspace.prompt_for_new_path(cx))
                 })??;
                 if let Some(abs_path) = abs_path.await.ok().flatten() {
-                    pane.update(cx, |pane, cx| {
+                    pane.update(cx, |pane, model, cx| {
                         if let Some(item) = pane.item_for_path(abs_path.clone(), cx) {
                             pane.remove_item(item.item_id(), false, false, cx);
                         }
@@ -1772,7 +1774,7 @@ impl Pane {
             }
         }
 
-        pane.update(cx, |_, cx| {
+        pane.update(cx, |_, model, cx| {
             cx.emit(Event::UserSavedItem {
                 item: item.downgrade_item(),
                 save_intent,
@@ -1846,7 +1848,7 @@ impl Pane {
             .items
             .get(self.active_item_index)
             .map(|item| item.as_ref());
-        self.toolbar.update(cx, |toolbar, cx| {
+        self.toolbar.update(cx, |toolbar, model, cx| {
             toolbar.set_active_item(active_item, cx);
         });
     }
@@ -1856,12 +1858,12 @@ impl Pane {
         let pane = cx.view().clone();
 
         cx.window_context().defer(move |cx| {
-            let Ok(status_bar) = workspace.update(cx, |workspace, _| workspace.status_bar.clone())
+            let Ok(status_bar) = workspace.update(cx, |workspace, model, _| workspace.status_bar.clone())
             else {
                 return;
             };
 
-            status_bar.update(cx, move |status_bar, cx| {
+            status_bar.update(cx, move |status_bar, model, cx| {
                 status_bar.set_active_pane(&pane, cx);
             });
         });
@@ -1916,7 +1918,7 @@ impl Pane {
             let id = self.item_for_index(ix)?.item_id();
 
             self.workspace
-                .update(cx, |_, cx| {
+                .update(cx, |_, model, cx| {
                     cx.defer(move |_, cx| move_item(&pane, &pane, id, destination_index, cx));
                 })
                 .ok()?;
@@ -1934,7 +1936,7 @@ impl Pane {
             let id = self.item_for_index(ix)?.item_id();
 
             self.workspace
-                .update(cx, |_, cx| {
+                .update(cx, |_, model, cx| {
                     cx.defer(move |_, cx| move_item(&pane, &pane, id, destination_index, cx));
                 })
                 .ok()?;
@@ -2073,7 +2075,7 @@ impl Pane {
                     is_active,
                     ix,
                 },
-                |tab, _, cx| cx.new_view(|_| tab.clone()),
+                |tab, _, cx| cx.new_model(|_| tab.clone()),
             )
             .drag_over::<DraggedTab>(|tab, _, cx| {
                 tab.bg(cx.theme().colors().drop_target_background)
@@ -2331,7 +2333,7 @@ impl Pane {
                                     entry_id: Some(entry_id),
                                 })),
                                 cx.handler_for(&pane, move |pane, cx| {
-                                    pane.project.update(cx, |_, cx| {
+                                    pane.project.update(cx, |_, model, cx| {
                                         cx.emit(project::Event::RevealInProjectPanel(
                                             ProjectEntryId::from_proto(entry_id),
                                         ))
@@ -2373,7 +2375,7 @@ impl Pane {
             .disabled(!self.can_navigate_backward())
             .tooltip({
                 let focus_handle = focus_handle.clone();
-                move |cx| Tooltip::for_action_in("Go Back", &GoBack, &focus_handle, cx)
+                move |window, cx| Tooltip::for_action_in("Go Back", &GoBack, &focus_handle, window, cx)
             });
 
         let navigate_forward = IconButton::new("navigate_forward", IconName::ArrowRight)
@@ -2385,7 +2387,7 @@ impl Pane {
             .disabled(!self.can_navigate_forward())
             .tooltip({
                 let focus_handle = focus_handle.clone();
-                move |cx| Tooltip::for_action_in("Go Forward", &GoForward, &focus_handle, cx)
+                move |window, cx| Tooltip::for_action_in("Go Forward", &GoForward, &focus_handle, window, cx)
             });
 
         let mut tab_items = self
@@ -2393,7 +2395,7 @@ impl Pane {
             .iter()
             .enumerate()
             .zip(tab_details(&self.items, cx))
-            .map(|((ix, item), detail)| self.render_tab(ix, &**item, detail, &focus_handle, cx))
+            .map(|((ix, item), detail)| self.render_tab(ix, &**item, detail, &focus_handle, window, cx))
             .collect::<Vec<_>>();
         let tab_count = tab_items.len();
         let unpinned_tabs = tab_items.split_off(self.pinned_tab_count);
@@ -2483,7 +2485,7 @@ impl Pane {
 
     pub fn set_zoomed(&mut self, zoomed: bool, model: &Model<Self>, cx: &mut AppContext) {
         self.zoomed = zoomed;
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn is_zoomed(&self) -> bool {
@@ -2565,7 +2567,7 @@ impl Pane {
 
         let from_pane = dragged_tab.pane.clone();
         self.workspace
-            .update(cx, |_, cx| {
+            .update(cx, |_, model, cx| {
                 cx.defer(move |workspace, cx| {
                     if let Some(split_direction) = split_direction {
                         to_pane = workspace.split_pane(to_pane, split_direction, cx);
@@ -2575,7 +2577,7 @@ impl Pane {
                     move_item(&from_pane, &to_pane, item_id, ix, cx);
                     if to_pane == from_pane {
                         if let Some(old_index) = old_ix {
-                            to_pane.update(cx, |this, _| {
+                            to_pane.update(cx, |this, model, _| {
                                 if old_index < this.pinned_tab_count
                                     && (ix == this.items.len() || ix > this.pinned_tab_count)
                                 {
@@ -2589,7 +2591,7 @@ impl Pane {
                             });
                         }
                     } else {
-                        to_pane.update(cx, |this, _| {
+                        to_pane.update(cx, |this, model, _| {
                             if this.items.len() > old_len // Did we not deduplicate on drag?
                                 && this.has_pinned_tabs()
                                 && ix < this.pinned_tab_count
@@ -2597,7 +2599,7 @@ impl Pane {
                                 this.pinned_tab_count += 1;
                             }
                         });
-                        from_pane.update(cx, |this, _| {
+                        from_pane.update(cx, |this, model, _| {
                             if let Some(index) = old_ix {
                                 if this.pinned_tab_count > index {
                                     this.pinned_tab_count -= 1;
@@ -2643,7 +2645,7 @@ impl Pane {
         let split_direction = self.drag_split_direction;
         let project_entry_id = *project_entry_id;
         self.workspace
-            .update(cx, |_, cx| {
+            .update(cx, |_, model, cx| {
                 cx.defer(move |workspace, cx| {
                     if let Some(path) = workspace
                         .project()
@@ -2661,7 +2663,7 @@ impl Pane {
                                             to_pane =
                                                 workspace.split_pane(to_pane, split_direction, cx);
                                         }
-                                        let new_item_handle = to_pane.update(cx, |pane, cx| {
+                                        let new_item_handle = to_pane.update(cx, |pane, model, cx| {
                                             pane.open_item(
                                                 project_entry_id,
                                                 true,
@@ -2712,7 +2714,7 @@ impl Pane {
         let paths = paths.paths().to_vec();
         let is_remote = self
             .workspace
-            .update(cx, |workspace, cx| {
+            .update(cx, |workspace, model, cx| {
                 if workspace.project().read(cx).is_via_collab() {
                     workspace.show_error(
                         &anyhow::anyhow!("Cannot drop files on a remote project"),
@@ -2729,7 +2731,7 @@ impl Pane {
         }
 
         self.workspace
-            .update(cx, |workspace, cx| {
+            .update(cx, |workspace, model, cx| {
                 let fs = Arc::clone(workspace.project().read(cx).fs());
                 cx.spawn(|workspace, mut cx| async move {
                     let mut is_file_checks = FuturesUnordered::new();
@@ -2931,7 +2933,7 @@ impl Render for Pane {
                         .map(ProjectEntryId::from_proto)
                         .or_else(|| pane.active_item()?.project_entry_ids(cx).first().copied());
                     if let Some(entry_id) = entry_id {
-                        pane.project.update(cx, |_, cx| {
+                        pane.project.update(cx, |_, model, cx| {
                             cx.emit(project::Event::RevealInProjectPanel(entry_id))
                         });
                     }
@@ -3021,7 +3023,7 @@ impl Render for Pane {
                     if let Some(workspace) = pane.workspace.upgrade() {
                         let pane = cx.view().downgrade();
                         cx.window_context().defer(move |cx| {
-                            workspace.update(cx, |workspace, cx| {
+                            workspace.update(cx, |workspace, model, cx| {
                                 workspace.go_back(pane, cx).detach_and_log_err(cx)
                             })
                         })
@@ -3034,7 +3036,7 @@ impl Render for Pane {
                     if let Some(workspace) = pane.workspace.upgrade() {
                         let pane = cx.view().downgrade();
                         cx.window_context().defer(move |cx| {
-                            workspace.update(cx, |workspace, cx| {
+                            workspace.update(cx, |workspace, model, cx| {
                                 workspace.go_forward(pane, cx).detach_and_log_err(cx)
                             })
                         })
@@ -3218,7 +3220,7 @@ impl NavHistoryState {
     pub fn did_update(&self, window: &mut gpui::Window, cx: &mut gpui::AppContext) {
         if let Some(pane) = self.pane.upgrade() {
             cx.defer(move |cx| {
-                pane.update(cx, |pane, cx| pane.history_updated(cx));
+                pane.update(cx, |pane, model, cx| pane.history_updated(cx));
             });
         }
     }
@@ -3324,9 +3326,9 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             assert!(pane
                 .close_active_item(&CloseActiveItem { save_intent: None }, cx)
                 .is_none())
@@ -3340,14 +3342,14 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         // 1. Add with a destination index
         //   a. Add before the active item
         set_labeled_items(&pane, ["A", "B*", "C"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| TestItem::new(cx).with_label("D"))),
+                Box::new(cx.new_model(|model, cx| TestItem::new(cx).with_label("D"))),
                 false,
                 false,
                 Some(0),
@@ -3358,9 +3360,9 @@ mod tests {
 
         //   b. Add after the active item
         set_labeled_items(&pane, ["A", "B*", "C"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| TestItem::new(cx).with_label("D"))),
+                Box::new(cx.new_model(|model, cx| TestItem::new(cx).with_label("D"))),
                 false,
                 false,
                 Some(2),
@@ -3371,9 +3373,9 @@ mod tests {
 
         //   c. Add at the end of the item list (including off the length)
         set_labeled_items(&pane, ["A", "B*", "C"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| TestItem::new(cx).with_label("D"))),
+                Box::new(cx.new_model(|model, cx| TestItem::new(cx).with_label("D"))),
                 false,
                 false,
                 Some(5),
@@ -3385,9 +3387,9 @@ mod tests {
         // 2. Add without a destination index
         //   a. Add with active item at the start of the item list
         set_labeled_items(&pane, ["A*", "B", "C"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| TestItem::new(cx).with_label("D"))),
+                Box::new(cx.new_model(|model, cx| TestItem::new(cx).with_label("D"))),
                 false,
                 false,
                 None,
@@ -3398,9 +3400,9 @@ mod tests {
 
         //   b. Add with active item at the end of the item list
         set_labeled_items(&pane, ["A", "B", "C*"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| TestItem::new(cx).with_label("D"))),
+                Box::new(cx.new_model(|model, cx| TestItem::new(cx).with_label("D"))),
                 false,
                 false,
                 None,
@@ -3417,40 +3419,40 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         // 1. Add with a destination index
         //   1a. Add before the active item
         let [_, _, _, d] = set_labeled_items(&pane, ["A", "B*", "C", "D"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(d, false, false, Some(0), cx);
         });
         assert_item_labels(&pane, ["D*", "A", "B", "C"], cx);
 
         //   1b. Add after the active item
         let [_, _, _, d] = set_labeled_items(&pane, ["A", "B*", "C", "D"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(d, false, false, Some(2), cx);
         });
         assert_item_labels(&pane, ["A", "B", "D*", "C"], cx);
 
         //   1c. Add at the end of the item list (including off the length)
         let [a, _, _, _] = set_labeled_items(&pane, ["A", "B*", "C", "D"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(a, false, false, Some(5), cx);
         });
         assert_item_labels(&pane, ["B", "C", "D", "A*"], cx);
 
         //   1d. Add same item to active index
         let [_, b, _] = set_labeled_items(&pane, ["A", "B*", "C"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(b, false, false, Some(1), cx);
         });
         assert_item_labels(&pane, ["A", "B*", "C"], cx);
 
         //   1e. Add item to index after same item in last position
         let [_, _, c] = set_labeled_items(&pane, ["A", "B*", "C"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(c, false, false, Some(2), cx);
         });
         assert_item_labels(&pane, ["A", "B", "C*"], cx);
@@ -3458,28 +3460,28 @@ mod tests {
         // 2. Add without a destination index
         //   2a. Add with active item at the start of the item list
         let [_, _, _, d] = set_labeled_items(&pane, ["A*", "B", "C", "D"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(d, false, false, None, cx);
         });
         assert_item_labels(&pane, ["A", "D*", "B", "C"], cx);
 
         //   2b. Add with active item at the end of the item list
         let [a, _, _, _] = set_labeled_items(&pane, ["A", "B", "C", "D*"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(a, false, false, None, cx);
         });
         assert_item_labels(&pane, ["B", "C", "D", "A*"], cx);
 
         //   2c. Add active item to active item at end of list
         let [_, _, c] = set_labeled_items(&pane, ["A", "B", "C*"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(c, false, false, None, cx);
         });
         assert_item_labels(&pane, ["A", "B", "C*"], cx);
 
         //   2d. Add active item to active item at start of list
         let [a, _, _] = set_labeled_items(&pane, ["A*", "B", "C"], cx);
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(a, false, false, None, cx);
         });
         assert_item_labels(&pane, ["A*", "B", "C"], cx);
@@ -3492,12 +3494,12 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         // singleton view
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| {
+                Box::new(cx.new_model(|model, cx| {
                     TestItem::new(cx)
                         .with_singleton(true)
                         .with_label("buffer 1")
@@ -3512,9 +3514,9 @@ mod tests {
         assert_item_labels(&pane, ["buffer 1*"], cx);
 
         // new singleton view with the same project entry
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| {
+                Box::new(cx.new_model(|model, cx| {
                     TestItem::new(cx)
                         .with_singleton(true)
                         .with_label("buffer 1")
@@ -3529,9 +3531,9 @@ mod tests {
         assert_item_labels(&pane, ["buffer 1*"], cx);
 
         // new singleton view with different project entry
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| {
+                Box::new(cx.new_model(|model, cx| {
                     TestItem::new(cx)
                         .with_singleton(true)
                         .with_label("buffer 2")
@@ -3546,9 +3548,9 @@ mod tests {
         assert_item_labels(&pane, ["buffer 1", "buffer 2*"], cx);
 
         // new multibuffer view with the same project entry
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| {
+                Box::new(cx.new_model(|model, cx| {
                     TestItem::new(cx)
                         .with_singleton(false)
                         .with_label("multibuffer 1")
@@ -3563,9 +3565,9 @@ mod tests {
         assert_item_labels(&pane, ["buffer 1", "buffer 2", "multibuffer 1*"], cx);
 
         // another multibuffer view with the same project entry
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.add_item(
-                Box::new(cx.new_view(|cx| {
+                Box::new(cx.new_model(|model, cx| {
                     TestItem::new(cx)
                         .with_singleton(false)
                         .with_label("multibuffer 1b")
@@ -3591,7 +3593,7 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         add_labeled_item(&pane, "A", false, cx);
         add_labeled_item(&pane, "B", false, cx);
@@ -3599,11 +3601,11 @@ mod tests {
         add_labeled_item(&pane, "D", false, cx);
         assert_item_labels(&pane, ["A", "B", "C", "D*"], cx);
 
-        pane.update(cx, |pane, cx| pane.activate_item(1, false, false, cx));
+        pane.update(cx, |pane, model, cx| pane.activate_item(1, false, false, cx));
         add_labeled_item(&pane, "1", false, cx);
         assert_item_labels(&pane, ["A", "B", "1*", "C", "D"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_active_item(&CloseActiveItem { save_intent: None }, cx)
         })
         .unwrap()
@@ -3611,10 +3613,10 @@ mod tests {
         .unwrap();
         assert_item_labels(&pane, ["A", "B*", "C", "D"], cx);
 
-        pane.update(cx, |pane, cx| pane.activate_item(3, false, false, cx));
+        pane.update(cx, |pane, model, cx| pane.activate_item(3, false, false, cx));
         assert_item_labels(&pane, ["A", "B", "C", "D*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_active_item(&CloseActiveItem { save_intent: None }, cx)
         })
         .unwrap()
@@ -3622,7 +3624,7 @@ mod tests {
         .unwrap();
         assert_item_labels(&pane, ["A", "B*", "C"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_active_item(&CloseActiveItem { save_intent: None }, cx)
         })
         .unwrap()
@@ -3630,7 +3632,7 @@ mod tests {
         .unwrap();
         assert_item_labels(&pane, ["A", "C*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_active_item(&CloseActiveItem { save_intent: None }, cx)
         })
         .unwrap()
@@ -3651,7 +3653,7 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         add_labeled_item(&pane, "A", false, cx);
         add_labeled_item(&pane, "B", false, cx);
@@ -3659,11 +3661,11 @@ mod tests {
         add_labeled_item(&pane, "D", false, cx);
         assert_item_labels(&pane, ["A", "B", "C", "D*"], cx);
 
-        pane.update(cx, |pane, cx| pane.activate_item(1, false, false, cx));
+        pane.update(cx, |pane, model, cx| pane.activate_item(1, false, false, cx));
         add_labeled_item(&pane, "1", false, cx);
         assert_item_labels(&pane, ["A", "B", "1*", "C", "D"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_active_item(&CloseActiveItem { save_intent: None }, cx)
         })
         .unwrap()
@@ -3671,10 +3673,10 @@ mod tests {
         .unwrap();
         assert_item_labels(&pane, ["A", "B", "C*", "D"], cx);
 
-        pane.update(cx, |pane, cx| pane.activate_item(3, false, false, cx));
+        pane.update(cx, |pane, model, cx| pane.activate_item(3, false, false, cx));
         assert_item_labels(&pane, ["A", "B", "C", "D*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_active_item(&CloseActiveItem { save_intent: None }, cx)
         })
         .unwrap()
@@ -3682,7 +3684,7 @@ mod tests {
         .unwrap();
         assert_item_labels(&pane, ["A", "B", "C*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_active_item(&CloseActiveItem { save_intent: None }, cx)
         })
         .unwrap()
@@ -3690,7 +3692,7 @@ mod tests {
         .unwrap();
         assert_item_labels(&pane, ["A", "B*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_active_item(&CloseActiveItem { save_intent: None }, cx)
         })
         .unwrap()
@@ -3706,11 +3708,11 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         set_labeled_items(&pane, ["A", "B", "C*", "D", "E"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_inactive_items(
                 &CloseInactiveItems {
                     save_intent: None,
@@ -3732,7 +3734,7 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         add_labeled_item(&pane, "A", true, cx);
         add_labeled_item(&pane, "B", false, cx);
@@ -3741,7 +3743,7 @@ mod tests {
         add_labeled_item(&pane, "E", false, cx);
         assert_item_labels(&pane, ["A^", "B", "C^", "D", "E*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_clean_items(
                 &CloseCleanItems {
                     close_pinned: false,
@@ -3762,11 +3764,11 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         set_labeled_items(&pane, ["A", "B", "C*", "D", "E"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_items_to_the_left(
                 &CloseItemsToTheLeft {
                     close_pinned: false,
@@ -3787,11 +3789,11 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         set_labeled_items(&pane, ["A", "B", "C*", "D", "E"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_items_to_the_right(
                 &CloseItemsToTheRight {
                     close_pinned: false,
@@ -3812,14 +3814,14 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         let item_a = add_labeled_item(&pane, "A", false, cx);
         add_labeled_item(&pane, "B", false, cx);
         add_labeled_item(&pane, "C", false, cx);
         assert_item_labels(&pane, ["A", "B", "C*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             let ix = pane.index_for_item_id(item_a.item_id()).unwrap();
             pane.pin_tab_at(ix, cx);
             pane.close_all_items(
@@ -3835,7 +3837,7 @@ mod tests {
         .unwrap();
         assert_item_labels(&pane, ["A*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             let ix = pane.index_for_item_id(item_a.item_id()).unwrap();
             pane.unpin_tab_at(ix, cx);
             pane.close_all_items(
@@ -3852,22 +3854,22 @@ mod tests {
 
         assert_item_labels(&pane, [], cx);
 
-        add_labeled_item(&pane, "A", true, cx).update(cx, |item, cx| {
+        add_labeled_item(&pane, "A", true, cx).update(cx, |item, model, cx| {
             item.project_items
                 .push(TestProjectItem::new(1, "A.txt", cx))
         });
-        add_labeled_item(&pane, "B", true, cx).update(cx, |item, cx| {
+        add_labeled_item(&pane, "B", true, cx).update(cx, |item, model, cx| {
             item.project_items
                 .push(TestProjectItem::new(2, "B.txt", cx))
         });
-        add_labeled_item(&pane, "C", true, cx).update(cx, |item, cx| {
+        add_labeled_item(&pane, "C", true, cx).update(cx, |item, model, cx| {
             item.project_items
                 .push(TestProjectItem::new(3, "C.txt", cx))
         });
         assert_item_labels(&pane, ["A^", "B^", "C*^"], cx);
 
         let save = pane
-            .update(cx, |pane, cx| {
+            .update(cx, |pane, model, cx| {
                 pane.close_all_items(
                     &CloseAllItems {
                         save_intent: None,
@@ -3888,7 +3890,7 @@ mod tests {
         add_labeled_item(&pane, "C", true, cx);
         assert_item_labels(&pane, ["A^", "B^", "C*^"], cx);
         let save = pane
-            .update(cx, |pane, cx| {
+            .update(cx, |pane, model, cx| {
                 pane.close_all_items(
                     &CloseAllItems {
                         save_intent: None,
@@ -3915,14 +3917,14 @@ mod tests {
 
         let project = Project::test(fs, None, cx).await;
         let (workspace, cx) = cx.add_window_view(|cx| Workspace::test_new(project.clone(), cx));
-        let pane = workspace.update(cx, |workspace, _| workspace.active_pane().clone());
+        let pane = workspace.update(cx, |workspace, model, _| workspace.active_pane().clone());
 
         let item_a = add_labeled_item(&pane, "A", false, cx);
         add_labeled_item(&pane, "B", false, cx);
         add_labeled_item(&pane, "C", false, cx);
         assert_item_labels(&pane, ["A", "B", "C*"], cx);
 
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             let ix = pane.index_for_item_id(item_a.item_id()).unwrap();
             pane.pin_tab_at(ix, cx);
             pane.close_all_items(
@@ -3955,9 +3957,9 @@ mod tests {
         is_dirty: bool,
         cx: &mut VisualTestContext,
     ) -> Box<View<TestItem>> {
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             let labeled_item = Box::new(
-                cx.new_view(|cx| TestItem::new(cx).with_label(label).with_dirty(is_dirty)),
+                cx.new_model(|model, cx| TestItem::new(cx).with_label(label).with_dirty(is_dirty)),
             );
             pane.add_item(labeled_item.clone(), false, false, None, cx);
             labeled_item
@@ -3969,7 +3971,7 @@ mod tests {
         labels: [&str; COUNT],
         cx: &mut VisualTestContext,
     ) -> [Box<View<TestItem>>; COUNT] {
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.items.clear();
             let mut active_item_index = 0;
 
@@ -3980,7 +3982,7 @@ mod tests {
                     active_item_index = index;
                 }
 
-                let labeled_item = Box::new(cx.new_view(|cx| TestItem::new(cx).with_label(label)));
+                let labeled_item = Box::new(cx.new_model(|model, cx| TestItem::new(cx).with_label(label)));
                 pane.add_item(labeled_item.clone(), false, false, None, cx);
                 index += 1;
                 labeled_item
@@ -3999,7 +4001,7 @@ mod tests {
         expected_states: [&str; COUNT],
         cx: &mut VisualTestContext,
     ) {
-        let actual_states = pane.update(cx, |pane, cx| {
+        let actual_states = pane.update(cx, |pane, model, cx| {
             pane.items
                 .iter()
                 .enumerate()

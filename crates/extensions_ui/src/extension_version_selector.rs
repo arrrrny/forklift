@@ -38,7 +38,7 @@ impl Render for ExtensionVersionSelector {
 
 impl ExtensionVersionSelector {
     pub fn new(delegate: ExtensionVersionSelectorDelegate, model: &Model<Self>, cx: &mut AppContext) -> Self {
-        let picker = cx.new_view(|cx| Picker::uniform_list(delegate, cx));
+        let picker = cx.new_model(|model, cx| Picker::uniform_list(delegate, model, cx));
         Self { picker }
     }
 }
@@ -172,7 +172,7 @@ impl PickerDelegate for ExtensionVersionSelectorDelegate {
         }
 
         let extension_store = ExtensionStore::global(cx);
-        extension_store.update(cx, |store, cx| {
+        extension_store.update(cx, |store, model, cx| {
             let extension_id = extension_version.id.clone();
             let version = extension_version.manifest.version.clone();
 
@@ -183,13 +183,13 @@ impl PickerDelegate for ExtensionVersionSelectorDelegate {
                 }
             });
 
-            store.install_extension(extension_id, version, cx);
+            store.install_extension(extension_id, version, model, cx);
         });
     }
 
     fn dismissed(&mut self, model: &Model<Picker>, cx: &mut AppContext) {
         self.view
-            .update(cx, |_, cx| cx.emit(DismissEvent))
+            .update(cx, |_, model, cx| cx.emit(DismissEvent))
             .log_err();
     }
 

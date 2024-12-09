@@ -75,7 +75,7 @@ impl PickerDelegate for LanguageModelPickerDelegate {
 
     fn set_selected_index(&mut self, ix: usize, model: &Model<Picker>, cx: &mut AppContext) {
         self.selected_index = ix.min(self.filtered_models.len().saturating_sub(1));
-        cx.notify();
+        model.notify(cx);
     }
 
     fn placeholder_text(&self, _window: &mut gpui::Window, _cx: &mut gpui::AppContext) -> Arc<str> {
@@ -131,7 +131,7 @@ impl PickerDelegate for LanguageModelPickerDelegate {
             this.update(&mut cx, |this, cx| {
                 this.delegate.filtered_models = filtered_models;
                 this.delegate.set_selected_index(0, cx);
-                cx.notify();
+                model.notify(cx);
             })
             .ok();
         })
@@ -339,7 +339,7 @@ impl<T: PopoverTrigger> RenderOnce for LanguageModelSelector<T> {
             selected_index: 0,
         };
 
-        let picker_view = cx.new_view(|cx| {
+        let picker_view = cx.new_model(|model, cx| {
             let picker = Picker::uniform_list(delegate, cx).max_height(Some(rems(20.).into()));
             picker
         });

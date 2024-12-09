@@ -6,10 +6,10 @@
 use gpui::{
     actions, bounds, div, point,
     prelude::{FluentBuilder as _, IntoElement},
-    px, rgb, size, AsyncAppContext, Bounds, InteractiveElement, KeyBinding, Menu, MenuItem,
-    ParentElement, Pixels, Render, ScreenCaptureStream, SharedString,
-    StatefulInteractiveElement as _, Styled, Task, View, AppContext, VisualContext, WindowBounds,
-    WindowHandle, WindowOptions,
+    px, rgb, size, AppContext, AsyncAppContext, Bounds, InteractiveElement, KeyBinding, Menu,
+    MenuItem, ParentElement, Pixels, Render, ScreenCaptureStream, SharedString,
+    StatefulInteractiveElement as _, Styled, Task, View, VisualContext, WindowBounds, WindowHandle,
+    WindowOptions,
 };
 #[cfg(not(target_os = "windows"))]
 use livekit_client::{
@@ -140,11 +140,11 @@ impl LivekitWindow {
                     ..Default::default()
                 },
                 |cx| {
-                    cx.new_view(|cx| {
+                    cx.new_model(|model, cx| {
                         let _events_task = cx.spawn(|this, mut cx| async move {
                             while let Some(event) = events.recv().await {
                                 this.update(&mut cx, |this: &mut LivekitWindow, cx| {
-                                    this.handle_room_event(event, cx)
+                                    this.handle_room_event(event, model, cx)
                                 })
                                 .ok();
                             }
@@ -191,7 +191,7 @@ impl LivekitWindow {
                 {
                     output.screen_share_output_view.take();
                 }
-                cx.notify();
+                model.notify(cx);
             }
 
             RoomEvent::TrackSubscribed {
@@ -210,24 +210,24 @@ impl LivekitWindow {
                     RemoteTrack::Video(track) => {
                         output.screen_share_output_view = Some((
                             track.clone(),
-                            cx.new_view(|cx| RemoteVideoTrackView::new(track, cx)),
+                            cx.new_model(|model, cx| RemoteVideoTrackView::new(track, model, cx)),
                         ));
                     }
                 }
-                cx.notify();
+                model.notify(cx);
             }
 
             RoomEvent::TrackMuted { participant, .. } => {
                 if let Participant::Remote(participant) = participant {
                     self.remote_participant(participant).muted = true;
-                    cx.notify();
+                    model.notify(cx);
                 }
             }
 
             RoomEvent::TrackUnmuted { participant, .. } => {
                 if let Participant::Remote(participant) = participant {
                     self.remote_participant(participant).muted = false;
-                    cx.notify();
+                    model.notify(cx);
                 }
             }
 
@@ -241,13 +241,13 @@ impl LivekitWindow {
                         }
                     });
                 }
-                cx.notify();
+                model.notify(cx);
             }
 
             _ => {}
         }
 
-        cx.notify();
+        model.notify(cx);
     }
 
     fn remote_participant(&mut self, participant: RemoteParticipant) -> &mut ParticipantState {
@@ -271,7 +271,7 @@ impl LivekitWindow {
             } else {
                 track.mute();
             }
-            cx.notify();
+            model.notify(cx);
         } else {
             let participant = self.room.local_participant();
             cx.spawn(|this, mut cx| async move {
@@ -289,7 +289,7 @@ impl LivekitWindow {
                 this.update(&mut cx, |this, cx| {
                     this.microphone_track = Some(publication);
                     this.microphone_stream = Some(stream);
-                    cx.notify();
+                    model.notify(cx);
                 })
             })
             .detach();
@@ -305,7 +305,7 @@ impl LivekitWindow {
                     participant.unpublish_track(&track.sid()).await.unwrap();
                 })
                 .detach();
-            cx.notify();
+            model.notify(cx);
         } else {
             let participant = self.room.local_participant();
             let sources = cx.screen_capture_sources();
@@ -327,7 +327,7 @@ impl LivekitWindow {
                 this.update(&mut cx, |this, cx| {
                     this.screen_share_track = Some(publication);
                     this.screen_share_stream = Some(stream);
-                    cx.notify();
+                    model.notify(cx);
                 })
             })
             .detach();
@@ -337,7 +337,8 @@ impl LivekitWindow {
     fn toggle_remote_audio_for_participant(
         &mut self,
         identity: &ParticipantIdentity,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Option<()> {
         let participant = self.remote_participants.iter().find_map(|(id, state)| {
             if id == identity {
@@ -348,7 +349,7 @@ impl LivekitWindow {
         })?;
         let publication = &participant.audio_output_stream.as_ref()?.0;
         publication.set_enabled(!publication.is_enabled());
-        cx.notify();
+        model.notify(cx);
         Some(())
     }
 }

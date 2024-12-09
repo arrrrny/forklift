@@ -98,7 +98,7 @@ impl StatusBar {
         item.set_active_pane_item(active_pane_item.as_deref(), cx);
 
         self.left_items.push(Box::new(item));
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn item_of_type<T: StatusItemView>(&self) -> Option<View<T>> {
@@ -143,7 +143,7 @@ impl StatusBar {
             self.right_items
                 .insert(position + 1 - self.left_items.len(), Box::new(item))
         }
-        cx.notify()
+        model.notify(cx)
     }
 
     pub fn remove_item_at(&mut self, position: usize, model: &Model<Self>, cx: &mut AppContext) {
@@ -152,7 +152,7 @@ impl StatusBar {
         } else {
             self.right_items.remove(position - self.left_items.len());
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn add_right_item<T>(&mut self, item: View<T>, model: &Model<Self>, cx: &mut AppContext)
@@ -163,7 +163,7 @@ impl StatusBar {
         item.set_active_pane_item(active_pane_item.as_deref(), cx);
 
         self.right_items.push(Box::new(item));
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn set_active_pane(
@@ -197,7 +197,7 @@ impl<T: StatusItemView> StatusItemViewHandle for View<T> {
         window: &mut gpui::Window,
         cx: &mut gpui::AppContext,
     ) {
-        self.update(cx, |this, cx| {
+        self.update(cx, |this, model, cx| {
             this.set_active_pane_item(active_pane_item, cx)
         });
     }

@@ -26,7 +26,7 @@ pub fn fallback_prompt_renderer(
     window: &mut gpui::Window,
     cx: &mut gpui::AppContext,
 ) -> RenderablePromptHandle {
-    let renderer = cx.new_view({
+    let renderer = cx.new_model({
         |cx| FallbackPromptRenderer {
             _level: level,
             message: message.to_string(),
@@ -34,7 +34,7 @@ pub fn fallback_prompt_renderer(
             focus: cx.focus_handle(),
             active_action_id: 0,
             detail: detail.filter(|text| !text.is_empty()).map(|text| {
-                cx.new_view(|cx| {
+                cx.new_model(|model, cx| {
                     let settings = ThemeSettings::get_global(cx);
                     let mut base_text_style = cx.text_style();
                     base_text_style.refine(&TextStyleRefinement {
@@ -80,12 +80,12 @@ impl FallbackPromptRenderer {
 
     fn select_first(&mut self, _: &menu::SelectFirst, model: &Model<Self>, cx: &mut AppContext) {
         self.active_action_id = self.actions.len().saturating_sub(1);
-        cx.notify();
+        model.notify(cx);
     }
 
     fn select_last(&mut self, _: &menu::SelectLast, model: &Model<Self>, cx: &mut AppContext) {
         self.active_action_id = 0;
-        cx.notify();
+        model.notify(cx);
     }
 
     fn select_next(&mut self, _: &menu::SelectNext, model: &Model<Self>, cx: &mut AppContext) {
@@ -94,12 +94,12 @@ impl FallbackPromptRenderer {
         } else {
             self.active_action_id = self.actions.len().saturating_sub(1);
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     fn select_prev(&mut self, _: &menu::SelectPrev, model: &Model<Self>, cx: &mut AppContext) {
         self.active_action_id = (self.active_action_id + 1) % self.actions.len();
-        cx.notify();
+        model.notify(cx);
     }
 }
 

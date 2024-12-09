@@ -51,10 +51,10 @@ impl TabSwitcher {
                 return;
             };
 
-            tab_switcher.update(cx, |tab_switcher, cx| {
+            tab_switcher.update(cx, |tab_switcher, model, cx| {
                 tab_switcher
                     .picker
-                    .update(cx, |picker, cx| picker.cycle_selection(cx))
+                    .update(cx, |picker, model, cx| picker.cycle_selection(cx))
             });
         });
     }
@@ -71,7 +71,7 @@ impl TabSwitcher {
             workspace.bottom_dock(),
             workspace.right_dock(),
         ] {
-            dock.update(cx, |this, cx| {
+            dock.update(cx, |this, model, cx| {
                 let Some(panel) = this
                     .active_panel()
                     .filter(|panel| panel.focus_handle(cx).contains_focused(cx))
@@ -94,7 +94,7 @@ impl TabSwitcher {
 
     fn new(delegate: TabSwitcherDelegate, model: &Model<Self>, cx: &mut AppContext) -> Self {
         Self {
-            picker: cx.new_view(|cx| Picker::nonsearchable_uniform_list(delegate, cx)),
+            picker: cx.new_model(|model, cx| Picker::nonsearchable_uniform_list(delegate, cx)),
             init_modifiers: cx.modifiers().modified().then_some(cx.modifiers()),
         }
     }
@@ -124,7 +124,7 @@ impl TabSwitcher {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) {
-        self.picker.update(cx, |picker, cx| {
+        self.picker.update(cx, |picker, model, cx| {
             picker
                 .delegate
                 .close_item_at(picker.delegate.selected_index(), cx)
@@ -199,13 +199,13 @@ impl TabSwitcherDelegate {
             match event {
                 PaneEvent::AddItem { .. }
                 | PaneEvent::RemovedItem { .. }
-                | PaneEvent::Remove { .. } => tab_switcher.picker.update(cx, |picker, cx| {
+                | PaneEvent::Remove { .. } => tab_switcher.picker.update(cx, |picker, model, cx| {
                     let selected_item_id = picker.delegate.selected_item_id();
                     picker.delegate.update_matches(cx);
                     if let Some(item_id) = selected_item_id {
                         picker.delegate.select_item(item_id, cx);
                     }
-                    cx.notify();
+                    model.notify(cx);
                 }),
                 _ => {}
             };
@@ -282,7 +282,7 @@ impl TabSwitcherDelegate {
         let Some(pane) = self.pane.upgrade() else {
             return;
         };
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.close_item_by_id(tab_match.item.item_id(), SaveIntent::Close, cx)
                 .detach_and_log_err(cx);
         });
@@ -314,7 +314,7 @@ impl PickerDelegate for TabSwitcherDelegate {
 
     fn set_selected_index(&mut self, ix: usize, model: &Model<Picker>, cx: &mut AppContext) {
         self.selected_index = ix;
-        cx.notify();
+        model.notify(cx);
     }
 
     fn separators_after_indices(&self) -> Vec<usize> {
@@ -338,14 +338,14 @@ impl PickerDelegate for TabSwitcherDelegate {
         let Some(selected_match) = self.matches.get(self.selected_index()) else {
             return;
         };
-        pane.update(cx, |pane, cx| {
+        pane.update(cx, |pane, model, cx| {
             pane.activate_item(selected_match.item_index, true, true, cx);
         });
     }
 
     fn dismissed(&mut self, model: &Model<Picker>, cx: &mut AppContext) {
         self.tab_switcher
-            .update(cx, |_, cx| cx.emit(DismissEvent))
+            .update(cx, |_, model, cx| cx.emit(DismissEvent))
             .log_err();
     }
 

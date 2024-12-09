@@ -55,7 +55,7 @@ impl CursorPosition {
 
             editor
                 .update(&mut cx, |editor, cx| {
-                    cursor_position.update(cx, |cursor_position, cx| {
+                    cursor_position.update(cx, |cursor_position, model, cx| {
                         cursor_position.selected_count = SelectionStats::default();
                         cursor_position.selected_count.selections = editor.selections.count();
                         match editor.mode() {
@@ -95,7 +95,7 @@ impl CursorPosition {
                             }
                         }
 
-                        cx.notify();
+                        model.notify(cx);
                     })
                 })
                 .ok()
@@ -170,13 +170,13 @@ impl Render for CursorPosition {
                     .label_size(LabelSize::Small)
                     .on_click(cx.listener(|this, _, cx| {
                         if let Some(workspace) = this.workspace.upgrade() {
-                            workspace.update(cx, |workspace, cx| {
+                            workspace.update(cx, |workspace, model, cx| {
                                 if let Some(editor) = workspace
                                     .active_item(cx)
                                     .and_then(|item| item.act_as::<Editor>(cx))
                                 {
                                     workspace
-                                        .toggle_modal(cx, |cx| crate::GoToLine::new(editor, cx))
+                                        .toggle_modal(cx, |cx| crate::GoToLine::new(editor, model, cx))
                                 }
                             });
                         }
@@ -186,11 +186,13 @@ impl Render for CursorPosition {
                             "Go to Line/Column",
                             &editor::actions::ToggleGoToLine,
                             context,
+                            model,
                             cx,
                         ),
                         None => Tooltip::for_action(
                             "Go to Line/Column",
                             &editor::actions::ToggleGoToLine,
+model,                             modelmodel, ,
                             cx,
                         ),
                     }),
@@ -210,16 +212,16 @@ impl StatusItemView for CursorPosition {
     ) {
         if let Some(editor) = active_pane_item.and_then(|item| item.act_as::<Editor>(cx)) {
             self._observe_active_editor =
-                Some(cx.observe(&editor, |cursor_position, editor, cx| {
-                    Self::update_position(cursor_position, editor, Some(UPDATE_DEBOUNCE), cx)
+                Some(cx.observe(&editor, |cursor_position, editor, model, cx| {
+                    Self::update_position(cursor_position, editor, Somemodel, (UPDATE_DEBOUNCE), model, cx)
                 }));
-            self.update_position(editor, None, cx);
+            self.update_position(editor, None, model, cx);
         } else {
             self.position = None;
             self._observe_active_editor = None;
         }
 
-        cx.notify();
+        model.notify(cx);
     }
 }
 

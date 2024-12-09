@@ -147,7 +147,7 @@ impl Workspace {
         })
         .detach();
         self.notifications.push((id, Box::new(notification)));
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn show_error<E>(&mut self, err: &E, model: &Model<Self>, cx: &mut AppContext)
@@ -159,7 +159,7 @@ impl Workspace {
         self.show_notification(
             NotificationId::unique::<WorkspaceErrorNotification>(),
             cx,
-            |cx| cx.new_view(|_cx| ErrorMessagePrompt::new(format!("Error: {err:#}"))),
+            |cx| cx.new_model(|_cx| ErrorMessagePrompt::new(format!("Error: {err:#}"))),
         );
     }
 
@@ -167,7 +167,7 @@ impl Workspace {
         struct PortalError;
 
         self.show_notification(NotificationId::unique::<PortalError>(), cx, |cx| {
-            cx.new_view(|_cx| {
+            cx.new_model(|_cx| {
                 ErrorMessagePrompt::new(err.to_string()).with_link_button(
                     "See docs",
                     "https://zed.dev/docs/linux#i-cant-open-any-files",
@@ -188,7 +188,7 @@ impl Workspace {
     pub fn show_toast(&mut self, toast: Toast, model: &Model<Self>, cx: &mut AppContext) {
         self.dismiss_notification(&toast.id, cx);
         self.show_notification(toast.id.clone(), cx, |cx| {
-            cx.new_view(|_cx| match toast.on_click.as_ref() {
+            cx.new_model(|_cx| match toast.on_click.as_ref() {
                 Some((click_msg, on_click)) => {
                     let on_click = on_click.clone();
                     simple_message_notification::MessageNotification::new(toast.msg.clone())
@@ -219,7 +219,7 @@ impl Workspace {
 
     pub fn clear_all_notifications(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         self.notifications.clear();
-        cx.notify();
+        model.notify(cx);
     }
 
     fn dismiss_notification_internal(
@@ -230,7 +230,7 @@ impl Workspace {
     ) {
         self.notifications.retain(|(existing_id, _)| {
             if existing_id == id {
-                cx.notify();
+                model.notify(cx);
                 false
             } else {
                 true
@@ -619,7 +619,7 @@ where
                 log::error!("{err:?}");
                 cx.update_root(|view, cx| {
                     if let Ok(workspace) = view.downcast::<Workspace>() {
-                        workspace.update(cx, |workspace, cx| workspace.show_error(&err, cx))
+                        workspace.update(cx, |workspace, model, cx| workspace.show_error(&err, cx))
                     }
                 })
                 .ok();

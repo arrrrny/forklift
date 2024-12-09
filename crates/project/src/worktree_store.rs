@@ -222,12 +222,13 @@ impl WorktreeStore {
                             upstream_client.clone(),
                             abs_path.clone(),
                             visible,
+                            model,
                             cx,
                         )
                     }
                 }
-                WorktreeStoreState::Local { fs } => {
-                    self.create_local_worktree(fs.clone(), abs_path.clone(), visible, cx)
+                WorktreeStoreState::Local { fs model, } => {
+                    self.create_local_worktree(fsmodel, .clone(), abs_path.clone(), visible, cx)
                 }
             };
 
@@ -361,7 +362,7 @@ impl WorktreeStore {
         }
 
         cx.emit(WorktreeStoreEvent::WorktreeAdded(worktree.clone()));
-        self.send_project_updates(cx);
+        self.send_project_updates(model, cx);
 
         let handle_id = worktree.entity_id();
         cx.observe_release(worktree, move |this, worktree, cx| {
@@ -453,6 +454,7 @@ impl WorktreeStore {
             } else {
                 self.add(
                     &Worktree::remote(project_id, replica_id, worktree, client.clone(), cx),
+                    model,
                     cx,
                 );
             }
@@ -505,14 +507,14 @@ impl WorktreeStore {
         self.worktrees.insert(destination_index, worktree_to_move);
         self.worktrees_reordered = true;
         cx.emit(WorktreeStoreEvent::WorktreeOrderChanged);
-        cx.notify();
+        model.notify(cx);
         Ok(())
     }
 
     pub fn disconnected_from_host(&mut self, cx: &mut AppContext) {
         for worktree in &self.worktrees {
             if let Some(worktree) = worktree.upgrade() {
-                worktree.update(cx, |worktree, _| {
+                worktree.update(cx, |worktree, model, _| {
                     if let Some(worktree) = worktree.as_remote_mut() {
                         worktree.disconnected_from_host();
                     }
@@ -547,7 +549,7 @@ impl WorktreeStore {
                 let worktrees = this.worktrees().collect::<Vec<_>>();
 
                 for worktree in worktrees {
-                    worktree.update(cx, |worktree, cx| {
+                    worktree.update(cx, |worktree, model, cx| {
                         let client = downstream_client.clone();
                         worktree.observe_updates(project_id, cx, {
                             move |update| {
@@ -620,7 +622,7 @@ impl WorktreeStore {
         // When not shared, only retain the visible worktrees
         for worktree_handle in self.worktrees.iter_mut() {
             if let WorktreeHandle::Strong(worktree) = worktree_handle {
-                let is_visible = worktree.update(cx, |worktree, _| {
+                let is_visible = worktree.update(cx, |worktree, model, _| {
                     worktree.stop_observing_updates();
                     worktree.is_visible()
                 });

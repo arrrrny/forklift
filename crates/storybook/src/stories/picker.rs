@@ -70,7 +70,7 @@ impl PickerDelegate for Delegate {
 
     fn set_selected_index(&mut self, ix: usize, model: &Model<Picker>, cx: &mut AppContext) {
         self.selected_ix = ix;
-        cx.notify();
+        model.notify(cx);
     }
 
     fn confirm(&mut self, secondary: bool, model: &Model<>Picker, _cx: &mut AppContext) {
@@ -110,7 +110,7 @@ impl PickerDelegate for Delegate {
 
 impl PickerStory {
     pub fn new(window: &mut gpui::Window, cx: &mut gpui::AppContext) -> View<Self> {
-        cx.new_view(|cx| {
+        cx.new_model(|model, cx| {
             cx.bind_keys([
                 KeyBinding::new("up", menu::SelectPrev, Some("picker")),
                 KeyBinding::new("pageup", menu::SelectFirst, Some("picker")),
@@ -130,7 +130,7 @@ impl PickerStory {
             ]);
 
             PickerStory {
-                picker: cx.new_view(|cx| {
+                picker: cx.new_model(|model, cx| {
                     let mut delegate = Delegate::new(&[
                         "Baguette (France)",
                         "Baklava (Turkey)",
@@ -182,9 +182,9 @@ impl PickerStory {
                         "Tzatziki (Greece)",
                         "Wiener Schnitzel (Austria)",
                     ]);
-                    delegate.update_matches("".into(), cx).detach();
+                    delegate.update_matches("".into(), model, cx).detach();
 
-                    let picker = Picker::uniform_list(delegate, cx);
+                    let picker = Picker::uniform_list(delegate, model, cx);
                     picker.focus(cx);
                     picker
                 }),

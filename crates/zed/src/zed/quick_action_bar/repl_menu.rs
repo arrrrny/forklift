@@ -50,7 +50,7 @@ impl QuickActionBar {
         }
 
         let has_nonempty_selection = {
-            editor.update(cx, |this, cx| {
+            editor.update(cx, |this, model, cx| {
                 this.selections
                     .count()
                     .ne(&0)

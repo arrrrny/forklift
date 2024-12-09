@@ -681,12 +681,12 @@ impl SshRemoteClient {
                 MAX_RECONNECT_ATTEMPTS
             );
             drop(lock);
-            self.set_state(State::ReconnectExhausted, cx);
+            self.set_state(State::ReconnectExhausted, model, cx);
             return Ok(());
         }
         drop(lock);
 
-        self.set_state(State::Reconnecting, cx);
+        self.set_state(State::Reconnecting, model, cx);
 
         log::info!("Trying to reconnect to ssh server... Attempt {}", attempts);
 
@@ -812,7 +812,7 @@ impl SshRemoteClient {
         mut connection_activity_rx: mpsc::Receiver<()>,
         cx: &mut AsyncAppContext,
     ) -> Task<Result<()>> {
-        let Ok(client) = this.update(cx, |this, _| this.client.clone()) else {
+        let Ok(client) = this.update(cx, |this, model, _| this.client.clone()) else {
             return Task::ready(Err(anyhow!("SshRemoteClient lost")));
         };
 
@@ -893,7 +893,7 @@ impl SshRemoteClient {
             state.heartbeat_recovered()
         };
 
-        self.set_state(next_state, cx);
+        self.set_state(next_state, model, cx);
 
         if missed_heartbeats >= MAX_MISSED_HEARTBEATS {
             log::error!(
@@ -925,7 +925,7 @@ impl SshRemoteClient {
                             ProxyLaunchError::ServerNotRunning => {
                                 log::error!("failed to reconnect because server is not running");
                                 this.update(&mut cx, |this, cx| {
-                                    this.set_state(State::ServerNotRunning, cx);
+                                    this.set_state(State::ServerNotRunning, model, cx);
                                 })?;
                             }
                         }
@@ -963,7 +963,7 @@ impl SshRemoteClient {
 
         if let Some(new_state) = new_state {
             lock.replace(new_state);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -977,7 +977,7 @@ impl SshRemoteClient {
         if is_reconnect_exhausted || is_server_not_running {
             cx.emit(SshRemoteEvent::Disconnected);
         }
-        cx.notify();
+        model.notify(model, cx);
     }
 
     pub fn subscribe_to_entity<E: 'static>(&self, remote_id: u64, entity: &Model<E>) {

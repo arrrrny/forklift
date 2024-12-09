@@ -1,6 +1,6 @@
 use editor::Editor;
 use gpui::{
-    div, AsyncAElement, ParentElement, Render, Subscription, Task, View, AppContext, WeakModel,
+    div, AppContext, AsyncAElement, ParentElement, Render, Subscription, Task, View, WeakModel,
     WeakView,
 };
 use language::{Buffer, BufferEvent, LanguageName, Toolchain};
@@ -55,7 +55,7 @@ impl ActiveToolchain {
                 .await?;
             let _ = this.update(&mut cx, |this, cx| {
                 this.term = term;
-                cx.notify();
+                model.notify(cx);
             });
             let worktree_id = active_file
                 .update(&mut cx, |this, cx| Some(this.file()?.worktree_id(cx)))
@@ -66,7 +66,7 @@ impl ActiveToolchain {
             let _ = this.update(&mut cx, |this, cx| {
                 this.active_toolchain = Some(toolchain);
 
-                cx.notify();
+                model.notify(cx);
             });
             Some(())
         })
@@ -86,7 +86,7 @@ impl ActiveToolchain {
             }
         }
 
-        cx.notify();
+        model.notify(cx);
     }
 
     fn active_toolchain(
@@ -152,8 +152,8 @@ impl Render for ActiveToolchain {
                     .label_size(LabelSize::Small)
                     .on_click(cx.listener(|this, _, cx| {
                         if let Some(workspace) = this.workspace.upgrade() {
-                            workspace.update(cx, |workspace, cx| {
-                                ToolchainSelector::toggle(workspace, cx)
+                            workspace.update(cx, |workspace, model, cx| {
+                                ToolchainSelector::toggle(workspace, model, cx)
                             });
                         }
                     }))
@@ -167,12 +167,13 @@ impl StatusItemView for ActiveToolchain {
     fn set_active_pane_item(
         &mut self,
         active_pane_item: Option<&dyn ItemHandle>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) {
         if let Some(editor) = active_pane_item.and_then(|item| item.downcast::<Editor>()) {
             self.active_toolchain.take();
-            self.update_lister(editor, cx);
+            self.update_lister(editor, model, cx);
         }
-        cx.notify();
+        model.notify(cx);
     }
 }

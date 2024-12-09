@@ -58,7 +58,7 @@ impl ToolchainStore {
         cx: &mut AppContext,
     ) -> Task<Option<()>> {
         match &self.0 {
-            ToolchainStoreInner::Local(local, _) => local.update(cx, |this, cx| {
+            ToolchainStoreInner::Local(local, _) => local.update(cx, |this, model, cx| {
                 this.activate_toolchain(worktree_id, toolchain, cx)
             }),
             ToolchainStoreInner::Remote(remote) => {
@@ -221,7 +221,7 @@ impl language::LanguageToolchainStore for LocalStore {
         cx: &mut AsyncAppContext,
     ) -> Option<Toolchain> {
         self.0
-            .update(cx, |this, cx| {
+            .update(cx, |this, model, cx| {
                 this.active_toolchain(worktree_id, language_name, cx)
             })
             .ok()?
@@ -238,7 +238,7 @@ impl language::LanguageToolchainStore for RemoteStore {
         cx: &mut AsyncAppContext,
     ) -> Option<Toolchain> {
         self.0
-            .update(cx, |this, cx| {
+            .update(cx, |this, model, cx| {
                 this.active_toolchain(worktree_id, language_name, cx)
             })
             .ok()?

@@ -16,7 +16,7 @@ impl ModeIndicator {
     pub fn new(model: &Model<Self>, cx: &mut AppContext) -> Self {
         cx.observe_pending_input(|this, cx| {
             this.update_pending_keys(cx);
-            cx.notify();
+            model.notify(cx);
         })
         .detach();
 
@@ -27,11 +27,11 @@ impl ModeIndicator {
                 return;
             }
             let vim = cx.view().clone();
-            handle.update(cx, |_, cx| {
+            handle.update(cx, |_, model, cx| {
                 cx.subscribe(&vim, |mode_indicator, vim, event, cx| match event {
                     VimEvent::Focused => {
                         mode_indicator.vim_subscription =
-                            Some(cx.observe(&vim, |_, _, cx| cx.notify()));
+                            Some(cx.observe(&vim, |_, _, cx| model.notify(cx)));
                         mode_indicator.vim = Some(vim.downgrade());
                     }
                 })
@@ -103,7 +103,7 @@ impl Render for ModeIndicator {
             vim_readable.mode.to_string()
         };
 
-        let current_operators_description = self.current_operators_description(vim.clone(), cx);
+        let current_operators_description = self.current_operators_description(vim.clone(), model, cx);
         let pending = self
             .pending_keys
             .as_ref()

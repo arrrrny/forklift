@@ -7,7 +7,7 @@ use crate::{right_click_menu, ContextMenu, Label};
 actions!(context_menu, [PrintCurrentDate, PrintBestFood]);
 
 fn build_menu(window: &mut gpui::Window, cx: &mut gpui::AppContext, header: impl Into<SharedString>) -> View<ContextMenu> {
-    ContextMenu::build(cx, |menu, _| {
+    ContextMenu::build(cx, window, |model, window, menu, cx| {
         menu.header(header)
             .separator()
             .action("Print current time", Box::new(PrintCurrentDate))

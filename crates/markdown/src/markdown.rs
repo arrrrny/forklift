@@ -189,7 +189,7 @@ impl Markdown {
                     if this.should_reparse {
                         this.parse(cx);
                     }
-                    cx.notify();
+                    model.notify(cx);
                 })
                 .ok();
                 anyhow::Ok(())
@@ -317,7 +317,7 @@ impl MarkdownElement {
                 let markdown = self.markdown.downgrade();
                 cx.spawn(|mut cx| async move {
                     language.await;
-                    markdown.update(&mut cx, |_, cx| cx.notify())
+                    markdown.update(&mut cx, |_, cx| model.notify(cx))
                 })
                 .detach_and_log_err(cx);
                 None
@@ -438,12 +438,12 @@ impl MarkdownElement {
                             cx.prevent_default()
                         }
 
-                        cx.notify();
+                        model.notify(cx);
                     }
                 } else if phase.capture() {
                     markdown.selection = Selection::default();
                     markdown.pressed_link = None;
-                    cx.notify();
+                    model.notify(cx);
                 }
             }
         });
@@ -463,12 +463,12 @@ impl MarkdownElement {
                     };
                     markdown.selection.set_head(source_index);
                     markdown.autoscroll_request = Some(source_index);
-                    cx.notify();
+                    model.notify(cx);
                 } else {
                     let is_hovering_link = hitbox.is_hovered(cx)
                         && rendered_text.link_for_position(event.position).is_some();
                     if is_hovering_link != was_hovering_link {
-                        cx.notify();
+                        model.notify(cx);
                     }
                 }
             }
@@ -490,7 +490,7 @@ impl MarkdownElement {
                             .text_for_range(markdown.selection.start..markdown.selection.end);
                         cx.write_to_primary(ClipboardItem::new_string(text))
                     }
-                    cx.notify();
+                    model.notify(cx);
                 }
             }
         });
@@ -504,7 +504,7 @@ impl MarkdownElement {
     ) -> Option<()> {
         let autoscroll_index = self
             .markdown
-            .update(cx, |markdown, _| markdown.autoscroll_request.take())?;
+            .update(cx, |markdown, model, _| markdown.autoscroll_request.take())?;
         let (position, line_height) = rendered_text.position_for_source_index(autoscroll_index)?;
 
         let text_style = self.style.base_text_style.clone();
@@ -533,7 +533,7 @@ impl MarkdownElement {
             let markdown = self.markdown.downgrade();
             move |event, phase, cx| {
                 markdown
-                    .update(cx, |markdown, cx| f(markdown, event, phase, cx))
+                    .update(cx, |markdown, model, cx| f(markdown, event, phase, cx))
                     .log_err();
             }
         });
@@ -604,7 +604,7 @@ impl Element for MarkdownElement {
                         }
                         MarkdownTag::CodeBlock(kind) => {
                             let language = if let CodeBlockKind::Fenced(language) = kind {
-                                self.load_language(language.as_ref(), cx)
+                                self.load_language(language.as_ref(), model, cx)
                             } else {
                                 None
                             };
@@ -762,7 +762,7 @@ impl Element for MarkdownElement {
 
         let hitbox = cx.insert_hitbox(bounds, false);
         rendered_markdown.element.prepaint(cx);
-        self.autoscroll(&rendered_markdown.text, cx);
+        self.autoscroll(&rendered_markdown.text, model, cx);
         hitbox
     }
 
@@ -784,14 +784,14 @@ impl Element for MarkdownElement {
             move |_, phase, cx| {
                 let text = text.clone();
                 if phase == DispatchPhase::Bubble {
-                    view.update(cx, move |this, cx| this.copy(&text, cx))
+                    view.update(cx, move |this, model, cx| this.copy(&text, model, cx))
                 }
             }
         });
 
-        self.paint_mouse_listeners(hitbox, &rendered_markdown.text, cx);
+        self.paint_mouse_listeners(hitbox, &rendered_markdown.text, model, cx);
         rendered_markdown.element.paint(cx);
-        self.paint_selection(bounds, &rendered_markdown.text, cx);
+        self.paint_selection(bounds, &rendered_markdown.text, model, cx);
     }
 }
 

@@ -82,7 +82,7 @@ impl Render for InlineCompletionButton {
                                 if let Some(workspace) = cx.window_handle().downcast::<Workspace>()
                                 {
                                     workspace
-                                        .update(cx, |workspace, cx| {
+                                        .update(cx, |workspace, model, cx| {
                                             workspace.show_toast(
                                                 Toast::new(
                                                     NotificationId::unique::<CopilotErrorToast>(),
@@ -91,7 +91,7 @@ impl Render for InlineCompletionButton {
                                                 .on_click("Reinstall Copilot", |cx| {
                                                     if let Some(copilot) = Copilot::global(cx) {
                                                         copilot
-                                                            .update(cx, |copilot, cx| {
+                                                            .update(cx, |copilot, model, cx| {
                                                                 copilot.reinstall(cx)
                                                             })
                                                             .detach();
@@ -113,9 +113,9 @@ impl Render for InlineCompletionButton {
                         .menu(move |cx| {
                             Some(match status {
                                 Status::Authorized => {
-                                    this.update(cx, |this, cx| this.build_copilot_context_menu(cx))
+                                    this.update(cx, |this, model, cx| this.build_copilot_context_menu(cx))
                                 }
-                                _ => this.update(cx, |this, cx| this.build_copilot_start_menu(cx)),
+                                _ => this.update(cx, |this, model, cx| this.build_copilot_start_menu(cx)),
                             })
                         })
                         .anchor(AnchorCorner::BottomRight)
@@ -162,7 +162,7 @@ impl Render for InlineCompletionButton {
                     PopoverMenu::new("supermaven")
                         .menu(move |cx| match &status {
                             SupermavenButtonStatus::NeedsActivation(activate_url) => {
-                                Some(ContextMenu::build(cx, |menu, _| {
+                                Some(ContextMenu::build(cx, window, |menu, model, window, cx| {
                                     let fs = fs.clone();
                                     let activate_url = activate_url.clone();
                                     menu.entry("Sign In", None, move |cx| {
@@ -182,7 +182,7 @@ impl Render for InlineCompletionButton {
                                 }))
                             }
                             SupermavenButtonStatus::Ready => Some(
-                                this.update(cx, |this, cx| this.build_supermaven_context_menu(cx)),
+                                this.update(cx, |this, model, cx| this.build_supermaven_context_menu(cx)),
                             ),
                             _ => None,
                         })
@@ -200,10 +200,10 @@ impl Render for InlineCompletionButton {
 impl InlineCompletionButton {
     pub fn new(fs: Arc<dyn Fs>, model: &Model<Self>, cx: &mut AppContext) -> Self {
         if let Some(copilot) = Copilot::global(cx) {
-            cx.observe(&copilot, |_, _, cx| cx.notify()).detach()
+            cx.observe(&copilot, |_, _, cx| model.notify(cx)).detach()
         }
 
-        cx.observe_global::<SettingsStore>(move |_, cx| cx.notify())
+        cx.observe_global::<SettingsStore>(move |_, cx| model.notify(cx))
             .detach();
 
         Self {
@@ -217,7 +217,7 @@ impl InlineCompletionButton {
 
     pub fn build_copilot_start_menu(&mut self, model: &Model<Self>, cx: &mut AppContext) -> View<ContextMenu> {
         let fs = self.fs.clone();
-        ContextMenu::build(cx, |menu, _| {
+        ContextMenu::build(cx, window, |menu, model, window, cx| {
             menu.entry("Sign In", None, copilot::initiate_sign_in)
                 .entry("Disable Copilot", None, {
                     let fs = fs.clone();
@@ -281,6 +281,7 @@ impl InlineCompletionButton {
                                 configure_disabled_globs(
                                     workspace,
                                     path_enabled.then_some(path.clone()),
+                                    model,
                                     cx,
                                 )
                             })
@@ -304,8 +305,8 @@ impl InlineCompletionButton {
     }
 
     fn build_copilot_context_menu(&self, model: &Model<Self>, cx: &mut AppContext) -> View<ContextMenu> {
-        ContextMenu::build(cx, |menu, cx| {
-            self.build_language_settings_menu(menu, cx)
+        ContextMenu::build(cx, window, |menu, model, window, cx| {
+            self.build_language_settings_menu(menu, model, cx)
                 .separator()
                 .link(
                     "Go to Copilot Settings",
@@ -319,8 +320,8 @@ impl InlineCompletionButton {
     }
 
     fn build_supermaven_context_menu(&self, model: &Model<Self>, cx: &mut AppContext) -> View<ContextMenu> {
-        ContextMenu::build(cx, |menu, cx| {
-            self.build_language_settings_menu(menu, cx)
+        ContextMenu::build(cx, window, |menu, model, window, cx| {
+            self.build_language_settings_menu(menu, model, cx)
                 .separator()
                 .action("Sign Out", supermaven::SignOut.boxed_clone())
         })
@@ -346,7 +347,7 @@ impl InlineCompletionButton {
         self.language = language.cloned();
         self.file = file;
 
-        cx.notify()
+        model.notify(cx)
     }
 }
 
@@ -357,13 +358,13 @@ impl StatusItemView for InlineCompletionButton {
                 cx.observe(&editor, Self::update_enabled),
                 editor.entity_id().as_u64() as usize,
             ));
-            self.update_enabled(editor, cx);
+            self.update_enabled(editor, model, cx);
         } else {
             self.language = None;
             self.editor_subscription = None;
             self.editor_enabled = None;
         }
-        cx.notify();
+        model.notify(cx);
     }
 }
 

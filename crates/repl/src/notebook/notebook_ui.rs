@@ -123,7 +123,7 @@ impl NotebookEditor {
             move |ix, cx| {
                 view.upgrade()
                     .and_then(|notebook_handle| {
-                        notebook_handle.update(cx, |notebook, cx| {
+                        notebook_handle.update(cx, |notebook, model, cx| {
                             notebook
                                 .cell_order
                                 .get(ix)
@@ -161,7 +161,7 @@ impl NotebookEditor {
     fn clear_outputs(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         for cell in self.cell_map.values() {
             if let Cell::Code(code_cell) = cell {
-                code_cell.update(cx, |cell, _cx| {
+                code_cell.update(cx, |cell, model, _cx| {
                     cell.clear_outputs();
                 });
             }
@@ -227,7 +227,7 @@ impl NotebookEditor {
                 index + 1
             };
             self.set_selected_index(ix, true, cx);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -237,7 +237,7 @@ impl NotebookEditor {
             let index = self.selected_index();
             let ix = if index == 0 { 0 } else { index - 1 };
             self.set_selected_index(ix, true, cx);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -245,7 +245,7 @@ impl NotebookEditor {
         let count = self.cell_count();
         if count > 0 {
             self.set_selected_index(0, true, cx);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -253,7 +253,7 @@ impl NotebookEditor {
         let count = self.cell_count();
         if count > 0 {
             self.set_selected_index(count - 1, true, cx);
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -412,21 +412,21 @@ impl NotebookEditor {
 
         match cell {
             Cell::Code(cell) => {
-                cell.update(cx, |cell, _cx| {
+                cell.update(cx, |cell, model, _cx| {
                     cell.set_selected(is_selected)
                         .set_cell_position(cell_position);
                 });
                 cell.clone().into_any_element()
             }
             Cell::Markdown(cell) => {
-                cell.update(cx, |cell, _cx| {
+                cell.update(cx, |cell, model, _cx| {
                     cell.set_selected(is_selected)
                         .set_cell_position(cell_position);
                 });
                 cell.clone().into_any_element()
             }
             Cell::Raw(cell) => {
-                cell.update(cx, |cell, _cx| {
+                cell.update(cx, |cell, model, _cx| {
                     cell.set_selected(is_selected)
                         .set_cell_position(cell_position);
                 });
@@ -632,7 +632,7 @@ impl Item for NotebookEditor {
     where
         Self: Sized,
     {
-        Some(cx.new_view(|cx| Self::new(self.project.clone(), self.notebook_item.clone(), cx)))
+        Some(cx.new_model(|model, cx| Self::new(self.project.clone(), self.notebook_item.clone(), cx)))
     }
 
     fn for_each_project_item(

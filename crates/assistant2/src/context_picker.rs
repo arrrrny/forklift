@@ -48,14 +48,19 @@ impl PickerDelegate for ContextPickerDelegate {
 
     fn set_selected_index(&mut self, ix: usize, model: &Model<Picker>, cx: &mut AppContext) {
         self.selected_ix = ix.min(self.filtered_entries.len().saturating_sub(1));
-        cx.notify();
+        model.notify(cx);
     }
 
     fn placeholder_text(&self, _window: &mut gpui::Window, _cx: &mut gpui::AppContext) -> Arc<str> {
         "Select a context source…".into()
     }
 
-    fn update_matches(&mut self, query: String, model: &Model<Picker>, cx: &mut AppContext) -> Task<()> {
+    fn update_matches(
+        &mut self,
+        query: String,
+        model: &Model<Picker>,
+        cx: &mut AppContext,
+    ) -> Task<()> {
         let all_commands = self.all_entries.clone();
         cx.spawn(|this, mut cx| async move {
             let filtered_commands = cx
@@ -80,7 +85,7 @@ impl PickerDelegate for ContextPickerDelegate {
             this.update(&mut cx, |this, cx| {
                 this.delegate.filtered_entries = filtered_commands;
                 this.delegate.set_selected_index(0, cx);
-                cx.notify();
+                model.notify(cx);
             })
             .ok();
         })
@@ -89,7 +94,7 @@ impl PickerDelegate for ContextPickerDelegate {
     fn confirm(&mut self, _secondary: bool, model: &Model<Picker>, cx: &mut AppContext) {
         if let Some(entry) = self.filtered_entries.get(self.selected_ix) {
             self.message_editor
-                .update(cx, |_message_editor, _cx| {
+                .update(cx, |_message_editor, model, _cx| {
                     println!("Insert context from {}", entry.name);
                 })
                 .ok();
@@ -97,7 +102,7 @@ impl PickerDelegate for ContextPickerDelegate {
         }
     }
 
-    fn dismissed(&mut self, model: &Model<>Picker, _cx: &mut AppContext) {}
+    fn dismissed(&mut self, model: &Model<Picker>, _cx: &mut AppContext) {}
 
     fn editor_position(&self) -> PickerEditorPosition {
         PickerEditorPosition::End
@@ -107,7 +112,8 @@ impl PickerDelegate for ContextPickerDelegate {
         &self,
         ix: usize,
         selected: bool,
-        model: &Model<>Picker, _cx: &mut AppContext,
+        model: &Model<Picker>,
+        _cx: &mut AppContext,
     ) -> Option<Self::ListItem> {
         let entry = self.filtered_entries.get(ix)?;
 
@@ -118,7 +124,7 @@ impl PickerDelegate for ContextPickerDelegate {
                 .selected(selected)
                 .tooltip({
                     let description = entry.description.clone();
-                    move |cx| cx.new_view(|_cx| Tooltip::new(description.clone())).into()
+                    move |cx| cx.new_model(|_cx| Tooltip::new(description.clone())).into()
                 })
                 .child(
                     v_flex()
@@ -176,12 +182,13 @@ impl<T: PopoverTrigger> RenderOnce for ContextPicker<T> {
             selected_ix: 0,
         };
 
-        let picker =
-            cx.new_view(|cx| Picker::uniform_list(delegate, cx).max_height(Some(rems(20.).into())));
+        let picker = cx.new_model(|model, cx| {
+            Picker::uniform_list(delegate, model, cx).max_height(Some(rems(20.).into()))
+        });
 
         let handle = self
             .message_editor
-            .update(cx, |this, _| this.context_picker_handle.clone())
+            .update(cx, |this, model, _| this.context_picker_handle.clone())
             .ok();
         PopoverMenu::new("context-picker")
             .menu(move |_cx| Some(picker.clone()))

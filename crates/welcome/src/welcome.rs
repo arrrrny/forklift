@@ -5,8 +5,9 @@ mod multibuffer_hint;
 use client::{telemetry::Telemetry, TelemetrySettings};
 use db::kvp::KEY_VALUE_STORE;
 use gpui::{
-    actions, svg, Action, AppContext, EventEmitter, FocusHandle, FocusableView, InteractiveElement,
-    ParentElement, Render, Styled, Subscription, Task, View, AppContext, VisualContext, WeakView,
+    actions, svg, Action, AppContext, AppContext, EventEmitter, FocusHandle, FocusableView,
+    InteractiveElement, ParentElement, Render, Styled, Subscription, Task, View, VisualContext,
+    WeakView,
 };
 use settings::{Settings, SettingsStore};
 use std::sync::Arc;
@@ -52,7 +53,7 @@ pub fn show_welcome_view(
         let welcome_page = WelcomePage::new(workspace, cx);
         workspace.add_item_to_center(Box::new(welcome_page.clone()), cx);
         cx.focus_view(&welcome_page);
-        cx.notify();
+        model.notify(cx);
 
         db::write_and_log(cx, || {
             KEY_VALUE_STORE.write_kvp(FIRST_OPEN.to_string(), "false".to_string())
@@ -132,7 +133,7 @@ impl Render for WelcomePage {
                                                     "welcome page: change theme".to_string(),
                                                 );
                                                 this.workspace
-                                                    .update(cx, |_workspace, cx| {
+                                                    .update(cx, |_workspace, model, cx| {
                                                         cx.dispatch_action(zed_actions::theme_selector::Toggle::default().boxed_clone());
                                                     })
                                                     .ok();
@@ -149,7 +150,7 @@ impl Render for WelcomePage {
                                                     "welcome page: change keymap".to_string(),
                                                 );
                                                 this.workspace
-                                                    .update(cx, |workspace, cx| {
+                                                    .update(cx, |workspace, model, cx| {
                                                         base_keymap_picker::toggle(
                                                             workspace,
                                                             &Default::default(),
@@ -342,7 +343,7 @@ impl Render for WelcomePage {
 
 impl WelcomePage {
     pub fn new(workspace: &Workspace, model: &Model<Workspace>, cx: &mut AppContext) -> View<Self> {
-        let this = cx.new_view(|cx| {
+        let this = cx.new_model(|model, cx| {
             cx.on_release(|this: &mut Self, _, _| {
                 this.telemetry
                     .report_app_event("welcome page: close".to_string());
@@ -354,7 +355,7 @@ impl WelcomePage {
                 workspace: workspace.weak_handle(),
                 telemetry: workspace.client().telemetry().clone(),
                 _settings_subscription: cx
-                    .observe_global::<SettingsStore>(move |_, cx| cx.notify()),
+                    .observe_global::<SettingsStore>(move |_, cx| model.notify(cx)),
             }
         });
 
@@ -371,7 +372,8 @@ impl WelcomePage {
     fn update_settings<T: Settings>(
         &mut self,
         selection: &Selection,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
         callback: impl 'static + Send + Fn(&mut T::FileContent, bool),
     ) {
         if let Some(workspace) = self.workspace.upgrade() {
@@ -416,13 +418,14 @@ impl Item for WelcomePage {
     fn clone_on_split(
         &self,
         _workspace_id: Option<WorkspaceId>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> Option<View<Self>> {
-        Some(cx.new_view(|cx| WelcomePage {
+        Some(cx.new_model(|model, cx| WelcomePage {
             focus_handle: cx.focus_handle(),
             workspace: self.workspace.clone(),
             telemetry: self.telemetry.clone(),
-            _settings_subscription: cx.observe_global::<SettingsStore>(move |_, cx| cx.notify()),
+            _settings_subscription: cx.observe_global::<SettingsStore>(move |_, cx| model.notify(cx)),
         }))
     }
 

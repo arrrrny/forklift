@@ -74,8 +74,8 @@ impl SlashCommand for TabSlashCommand {
 
         let active_item_path = workspace.as_ref().and_then(|workspace| {
             workspace
-                .update(cx, |workspace, cx| {
-                    let snapshot = active_item_buffer(workspace, cx).ok()?;
+                .update(cx, |workspace, model, cx| {
+                    let snapshot = active_item_buffer(workspace, model, cx).ok()?;
                     snapshot.resolve_file_path(cx, true)
                 })
                 .ok()
@@ -83,7 +83,7 @@ impl SlashCommand for TabSlashCommand {
         });
         let current_query = arguments.last().cloned().unwrap_or_default();
         let tab_items_search =
-            tab_items_for_queries(workspace, &[current_query], cancel, false, cx);
+            tab_items_for_queries(workspace, &[current_query], cancel, false, model, cx);
 
         let comment_id = cx.theme().syntax().highlight_id("comment").map(HighlightId);
         cx.spawn(|_| async move {
@@ -177,7 +177,7 @@ fn tab_items_for_queries(
                 .context("no workspace")?
                 .update(&mut cx, |workspace, cx| {
                     if strict_match && empty_query {
-                        let snapshot = active_item_buffer(workspace, cx)?;
+                        let snapshot = active_item_buffer(workspace, model, cx)?;
                         let full_path = snapshot.resolve_file_path(cx, true);
                         return anyhow::Ok(vec![(full_path, snapshot, 0)]);
                     }

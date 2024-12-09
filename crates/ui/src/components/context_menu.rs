@@ -57,11 +57,11 @@ impl ContextMenu {
         cx: &mut gpui::AppContext,
         f: impl FnOnce(Self, &mut Window, &Model<Self>, &mut AppContext) -> Self,
     ) -> gpui::Model<Self> {
-        cx.new_model(|cx| {
+        cx.new_model(|model, cx| {
             let focus_handle = window.focus_handle();
             let this = cx.handle();
             let _on_blur_subscription = window.on_blur(&focus_handle, cx, move |window, cx| {
-                this.update(cx, |this: &mut Self, cx| {
+                this.update(cx, |this, model: &mut Self, cx| {
                     this.cancel(&menu::Cancel, window, cx)
                 })
             });
@@ -263,7 +263,7 @@ impl ContextMenu {
         cx: &mut AppContext,
     ) {
         self.selected_index = self.items.iter().position(|item| item.is_selectable());
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn select_last(&mut self) -> Option<usize> {
@@ -284,7 +284,7 @@ impl ContextMenu {
         cx: &mut AppContext,
     ) {
         if self.select_last().is_some() {
-            cx.notify();
+            model.notify(cx);
         }
     }
 
@@ -303,7 +303,7 @@ impl ContextMenu {
                 for (ix, item) in self.items.iter().enumerate().skip(next_index) {
                     if item.is_selectable() {
                         self.selected_index = Some(ix);
-                        cx.notify();
+                        model.notify(cx);
                         break;
                     }
                 }
@@ -327,7 +327,7 @@ impl ContextMenu {
                 for (ix, item) in self.items.iter().enumerate().take(ix).rev() {
                     if item.is_selectable() {
                         self.selected_index = Some(ix);
-                        cx.notify();
+                        model.notify(cx);
                         break;
                     }
                 }
@@ -363,7 +363,7 @@ impl ContextMenu {
         }) {
             self.selected_index = Some(ix);
             self.delayed = true;
-            cx.notify();
+            model.notify(cx);
             let action = dispatched.boxed_clone();
             let window = window.handle();
             cx.spawn(|this, mut cx| async move {
@@ -371,7 +371,7 @@ impl ContextMenu {
                     .timer(Duration::from_millis(50))
                     .await;
                 window.update(&mut cx, |window, cx| {
-                    this.update(cx, |this, cx| {
+                    this.update(cx, |this, model, cx| {
                         this.cancel(&menu::Cancel, window, cx);
                         window.dispatch_action(action, cx);
                     })
@@ -551,7 +551,7 @@ impl Render for ContextMenu {
                                                 let context = self.action_context.clone();
                                                 move |_, window, cx| {
                                                     handler(context.as_ref(), window, cx);
-                                                    menu.update(cx, |menu, cx| {
+                                                    menu.update(cx, |menu, model, cx| {
                                                         menu.clicked = true;
                                                         cx.emit(DismissEvent);
                                                     })
@@ -581,7 +581,7 @@ impl Render for ContextMenu {
                                                     let context = self.action_context.clone();
                                                     move |_, window, cx| {
                                                         handler(context.as_ref(), window, cx);
-                                                        menu.update(cx, |menu, cx| {
+                                                        menu.update(cx, |menu, model, cx| {
                                                             menu.clicked = true;
                                                             cx.emit(DismissEvent);
                                                         })

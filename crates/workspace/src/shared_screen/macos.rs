@@ -47,7 +47,7 @@ impl SharedScreen {
                 while let Some(frame) = frames.next().await {
                     this.update(&mut cx, |this, cx| {
                         this.frame = Some(frame);
-                        cx.notify();
+                        model.notify(cx);
                     })?;
                 }
                 this.update(&mut cx, |_, cx| cx.emit(Event::Close))?;
@@ -116,7 +116,7 @@ impl Item for SharedScreen {
         cx: &mut AppContext,
     ) -> Option<View<Self>> {
         let track = self.track.upgrade()?;
-        Some(cx.new_view(|cx| Self::new(track, self.peer_id, self.user.clone(), cx)))
+        Some(cx.new_model(|model, cx| Self::new(track, self.peer_id, self.user.clone(), cx)))
     }
 
     fn to_item_events(event: &Self::Event, mut f: impl FnMut(ItemEvent)) {

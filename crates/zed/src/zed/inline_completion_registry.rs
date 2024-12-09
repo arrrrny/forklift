@@ -41,8 +41,8 @@ pub fn init(telemetry: Arc<Telemetry>, cx: &mut AppContext) {
 
     let mut provider = all_language_settings(None, cx).inline_completions.provider;
     for (editor, window) in editors.borrow().iter() {
-        _ = window.update(cx, |_window, cx| {
-            _ = editor.update(cx, |editor, cx| {
+        _ = window.update(cx, |_window, model, cx| {
+            _ = editor.update(cx, |editor, model, cx| {
                 assign_inline_completion_provider(editor, provider, &telemetry, cx);
             })
         });
@@ -53,8 +53,8 @@ pub fn init(telemetry: Arc<Telemetry>, cx: &mut AppContext) {
         if new_provider != provider {
             provider = new_provider;
             for (editor, window) in editors.borrow().iter() {
-                _ = window.update(cx, |_window, cx| {
-                    _ = editor.update(cx, |editor, cx| {
+                _ = window.update(cx, |_window, model, cx| {
+                    _ = editor.update(cx, |editor, model, cx| {
                         assign_inline_completion_provider(editor, provider, &telemetry, cx);
                     })
                 });
@@ -121,7 +121,7 @@ fn assign_inline_completion_provider(
             if let Some(copilot) = Copilot::global(cx) {
                 if let Some(buffer) = editor.buffer().read(cx).as_singleton() {
                     if buffer.read(cx).file().is_some() {
-                        copilot.update(cx, |copilot, cx| {
+                        copilot.update(cx, |copilot, model, cx| {
                             copilot.register_buffer(&buffer, cx);
                         });
                     }

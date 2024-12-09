@@ -70,7 +70,11 @@ impl MultibufferHint {
     }
 
     /// Determines the toolbar location for this [`MultibufferHint`].
-    fn determine_toolbar_location(&mut self, model: &Model<Self>, cx: &mut AppContext) -> ToolbarItemLocation {
+    fn determine_toolbar_location(
+        &mut self,
+        model: &Model<Self>,
+        cx: &mut AppContext,
+    ) -> ToolbarItemLocation {
         if Self::shown_count() >= NUMBER_OF_HINTS {
             return ToolbarItemLocation::Hidden;
         }
@@ -99,9 +103,10 @@ impl ToolbarItemView for MultibufferHint {
     fn set_active_pane_item(
         &mut self,
         active_pane_item: Option<&dyn ItemHandle>,
-        model: &Model<Self>, cx: &mut AppContext,
+        model: &Model<Self>,
+        cx: &mut AppContext,
     ) -> ToolbarItemLocation {
-        cx.notify();
+        model.notify(cx);
         self.active_item = active_pane_item.map(|item| item.boxed_clone());
 
         let Some(active_pane_item) = active_pane_item else {
@@ -113,8 +118,8 @@ impl ToolbarItemView for MultibufferHint {
             cx,
             Box::new(move |event, cx| {
                 if let ItemEvent::UpdateBreadcrumbs = event {
-                    this.update(cx, |this, cx| {
-                        cx.notify();
+                    this.update(cx, |this, model, cx| {
+                        model.notify(cx);
                         let location = this.determine_toolbar_location(cx);
                         cx.emit(ToolbarItemEvent::ChangeLocation(location))
                     })

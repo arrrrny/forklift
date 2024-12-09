@@ -19,7 +19,7 @@ impl Head {
         edit_handler: impl FnMut(&mut V, View<Editor>, &EditorEvent,&Model<'>,  &mut AppContext) + 'static,
         model: &Model<V>, cx: &mut AppContext,
     ) -> Self {
-        let editor = cx.new_view(|cx| {
+        let editor = cx.new_model(|model, cx| {
             let mut editor = Editor::single_line(cx);
             editor.set_placeholder_text(placeholder_text, cx);
             editor
@@ -32,7 +32,7 @@ impl Head {
         blur_handler: impl FnMut(&mut V,&Model<'>,  &mut AppContext) + 'static,
         model: &Model<V>, cx: &mut AppContext,
     ) -> Self {
-        let head = cx.new_view(EmptyHead::new);
+        let head = cx.new_model(EmptyHead::new);
         cx.on_blur(&head.focus_handle(cx), blur_handler).detach();
         Self::Empty(head)
     }

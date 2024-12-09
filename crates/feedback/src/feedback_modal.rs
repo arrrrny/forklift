@@ -138,7 +138,7 @@ impl FeedbackModal {
 
                         workspace.update(&mut cx, |workspace, cx| {
                             workspace.toggle_modal(cx, move |cx| {
-                                FeedbackModal::new(system_specs, project, buffer, cx)
+                                FeedbackModal::new(system_specs, project, buffer, model, cx)
                             });
                         })?;
 
@@ -157,27 +157,28 @@ impl FeedbackModal {
         model: &Model<Self>,
         cx: &mut AppContext,
     ) -> Self {
-        let email_address_editor = cx.new_view(|cx| {
+        let email_address_editor = cx.new_model(|model, cx| {
             let mut editor = Editor::single_line(cx);
-            editor.set_placeholder_text("Email address (optional)", cx);
+            editor.set_placeholder_text("Email address (optional)", model, cx);
 
             if let Ok(Some(email_address)) = KEY_VALUE_STORE.read_kvp(DATABASE_KEY_NAME) {
-                editor.set_text(email_address, cx)
+                editor.set_text(email_address, model, cx)
             }
 
             editor
         });
 
-        let feedback_editor = cx.new_view(|cx| {
-            let mut editor = Editor::for_buffer(buffer, Some(project.clone()), cx);
+        let feedback_editor = cx.new_model(|model, cx| {
+            let mut editor = Editor::for_buffer(buffer, Some(project.clone()), model, cx);
             editor.set_placeholder_text(
                 "You can use markdown to organize your feedback with code and links.",
+                model,
                 cx,
             );
-            editor.set_show_gutter(false, cx);
-            editor.set_show_indent_guides(false, cx);
-            editor.set_show_inline_completions(Some(false), cx);
-            editor.set_vertical_scroll_margin(5, cx);
+            editor.set_show_gutter(false, model, cx);
+            editor.set_show_indent_guides(false, model, cx);
+            editor.set_show_inline_completions(Some(false), model, cx);
+            editor.set_vertical_scroll_margin(5, model, cx);
             editor.set_use_modal_editing(false);
             editor
         });
@@ -192,7 +193,7 @@ impl FeedbackModal {
                     .expect("Feedback editor is never a multi-buffer")
                     .read(cx)
                     .len() as i32;
-                cx.notify();
+                model.notify(cx);
             }
         })
         .detach();
@@ -226,7 +227,7 @@ impl FeedbackModal {
                     this.submission_state = Some(SubmissionState::CannotSubmit {
                         reason: CannotSubmitReason::AwaitingSubmission,
                     });
-                    cx.notify();
+                    model.notify(cx);
                 })
                 .log_err();
 
@@ -237,7 +238,7 @@ impl FeedbackModal {
                     Ok(_) => {
                         this.update(&mut cx, |this, cx| {
                             this.dismiss_modal = true;
-                            cx.notify();
+                            model.notify(cx);
                             cx.emit(DismissEvent)
                         })
                         .ok();
@@ -257,7 +258,7 @@ impl FeedbackModal {
                             .detach();
 
                             this.submission_state = Some(SubmissionState::CanSubmit);
-                            cx.notify();
+                            model.notify(cx);
                         })
                         .log_err();
                     }

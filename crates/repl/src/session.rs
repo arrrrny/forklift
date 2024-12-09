@@ -69,15 +69,15 @@ impl EditorBlock {
             .ok_or_else(|| anyhow::anyhow!("workspace dropped"))?;
 
         let execution_view =
-            cx.new_view(|cx| ExecutionView::new(status, workspace.downgrade(), cx));
+            cx.new_model(|model, cx| ExecutionView::new(status, workspace.downgrade(), model, cx));
 
-        let (block_id, invalidation_anchor) = editor.update(cx, |editor, cx| {
+        let (block_id, invalidation_anchor) = editor.update(cx, |editor, model, cx| {
             let buffer = editor.buffer().clone();
             let buffer_snapshot = buffer.read(cx).snapshot(cx);
             let end_point = code_range.end.to_point(&buffer_snapshot);
             let next_row_start = end_point + Point::new(1, 0);
             if next_row_start > buffer_snapshot.max_point() {
-                buffer.update(cx, |buffer, cx| {
+                buffer.update(cx, |buffer, model, cx| {
                     buffer.edit(
                         [(
                             buffer_snapshot.max_point()..buffer_snapshot.max_point(),
@@ -112,7 +112,7 @@ impl EditorBlock {
     }
 
     fn handle_message(&mut self, message: &JupyterMessage, model: &Model<Session>, cx: &mut AppContext) {
-        self.execution_view.update(cx, |execution_view, cx| {
+        self.execution_view.update(cx, |execution_view, model, cx| {
             execution_view.push_message(&message.content, cx);
         });
     }
@@ -210,7 +210,7 @@ impl Session {
         let editor_handle = editor.clone();
 
         editor
-            .update(cx, |editor, _cx| {
+            .update(cx, |editor, model, _cx| {
                 setup_editor_session_actions(editor, editor_handle);
             })
             .ok();
@@ -254,13 +254,13 @@ impl Session {
                 working_directory,
                 self.fs.clone(),
                 session_view,
-                cx,
+                model, cx,
             ),
             KernelSpecification::Remote(remote_kernel_specification) => RemoteRunningKernel::new(
                 remote_kernel_specification,
                 working_directory,
                 session_view,
-                cx,
+                model, cx,
             ),
         };
 
@@ -285,15 +285,15 @@ impl Session {
             })
             .shared();
 
-        self.kernel(Kernel::StartingKernel(pending_kernel), cx);
-        cx.notify();
+        self.kernel(Kernel::StartingKernel(pending_kernel), model, cx);
+        model.notify(cx);
     }
 
     pub fn kernel_errored(&mut self, error_message: String, model: &Model<Self>, cx: &mut AppContext) {
-        self.kernel(Kernel::ErroredLaunch(error_message.clone()), cx);
+        self.kernel(Kernel::ErroredLaunch(error_message.clone()), model, cx);
 
         self.blocks.values().for_each(|block| {
-            block.execution_view.update(cx, |execution_view, cx| {
+            block.execution_view.update(cx, |execution_view, model, cx| {
                 match execution_view.status {
                     ExecutionStatus::Finished => {
                         // Do nothing when the output was good
@@ -304,7 +304,7 @@ impl Session {
                             ExecutionStatus::KernelErrored(error_message.clone())
                     }
                 }
-                cx.notify();
+                model.notify(cx);
             });
         });
     }
@@ -331,11 +331,11 @@ impl Session {
 
             if !blocks_to_remove.is_empty() {
                 self.editor
-                    .update(cx, |editor, cx| {
+                    .update(cx, |editor, model, cx| {
                         editor.remove_blocks(blocks_to_remove, None, cx);
                     })
                     .ok();
-                cx.notify();
+                model.notify(cx);
             }
         }
     }
@@ -353,7 +353,7 @@ impl Session {
             self.blocks.values().map(|block| block.block_id).collect();
 
         self.editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.remove_blocks(blocks_to_remove, None, cx);
             })
             .ok();
@@ -398,7 +398,7 @@ impl Session {
         });
 
         self.editor
-            .update(cx, |editor, cx| {
+            .update(cx, |editor, model, cx| {
                 editor.remove_blocks(blocks_to_remove, None, cx);
             })
             .ok();
@@ -419,14 +419,14 @@ impl Session {
         let on_close: CloseBlockFn = Arc::new(
             move |block_id: CustomBlockId, window: &mut gpui::Window, cx: &mut gpui::AppContext| {
                 if let Some(session) = session_view.upgrade() {
-                    session.update(cx, |session, cx| {
+                    session.update(cx, |session, model, cx| {
                         session.blocks.remove(&parent_message_id);
-                        cx.notify();
+                        model.notify(cx);
                     });
                 }
 
                 if let Some(editor) = weak_editor.upgrade() {
-                    editor.update(cx, |editor, cx| {
+                    editor.update(cx, |editor, model, cx| {
                         let mut block_ids = HashSet::default();
                         block_ids.insert(block_id);
                         editor.remove_blocks(block_ids, None, cx);
@@ -436,7 +436,7 @@ impl Session {
         );
 
         let Ok(editor_block) =
-            EditorBlock::new(self.editor.clone(), anchor_range, status, on_close, cx)
+            EditorBlock::new(self.editor.clone(), anchor_range, status, on_close, model, cx)
         else {
             return;
         };
@@ -452,7 +452,7 @@ impl Session {
 
         match &self.kernel {
             Kernel::RunningKernel(_) => {
-                self.send(message, cx).ok();
+                self.send(message, model, cx).ok();
             }
             Kernel::StartingKernel(task) => {
                 // Queue up the execution as a task to run after the kernel starts
@@ -472,7 +472,7 @@ impl Session {
         }
 
         if move_down {
-            editor.update(cx, move |editor, cx| {
+            editor.update(cx, move |editor, model, cx| {
                 editor.change_selections(Some(Autoscroll::top_relative(8)), cx, |selections| {
                     selections.select_ranges([new_cursor_pos..new_cursor_pos]);
                 });
@@ -496,11 +496,11 @@ impl Session {
                     cx.entity_id().to_string(),
                 );
 
-                cx.notify();
+                model.notify(cx);
             }
             JupyterMessageContent::KernelInfoReply(reply) => {
                 self.kernel.set_kernel_info(reply);
-                cx.notify();
+                model.notify(cx);
             }
             JupyterMessageContent::UpdateDisplayData(update) => {
                 let display_id = if let Some(display_id) = update.transient.display_id.clone() {
@@ -510,7 +510,7 @@ impl Session {
                 };
 
                 self.blocks.iter_mut().for_each(|(_, block)| {
-                    block.execution_view.update(cx, |execution_view, cx| {
+                    block.execution_view.update(cx, |execution_view, model, cx| {
                         execution_view.update_display_data(&update.data, &display_id, cx);
                     });
                 });
@@ -520,14 +520,14 @@ impl Session {
         }
 
         if let Some(block) = self.blocks.get_mut(parent_message_id) {
-            block.handle_message(message, cx);
+            block.handle_message(message, model, cx);
         }
     }
 
     pub fn interrupt(&mut self, model: &Model<Self>, cx: &mut AppContext) {
         match &mut self.kernel {
             Kernel::RunningKernel(_kernel) => {
-                self.send(InterruptRequest {}.into(), cx).ok();
+                self.send(InterruptRequest {}.into(), model, cx).ok();
             }
             Kernel::StartingKernel(_task) => {
                 // NOTE: If we switch to a literal queue instead of chaining on to the task, clear all queued executions
@@ -574,17 +574,17 @@ impl Session {
                     this.update(&mut cx, |session, cx| {
                         session.clear_outputs(cx);
                         session.kernel(Kernel::Shutdown, cx);
-                        cx.notify();
+                        model.notify(cx);
                     })
                     .ok();
                 })
                 .detach();
             }
             _ => {
-                self.kernel(Kernel::Shutdown, cx);
+                self.kernel(Kernel::Shutdown, model, cx);
             }
         }
-        cx.notify();
+        model.notify(cx);
     }
 
     pub fn restart(&mut self, model: &Model<Self>, cx: &mut AppContext) {
@@ -626,7 +626,7 @@ impl Session {
                 self.start_kernel(cx);
             }
         }
-        cx.notify();
+        model.notify(cx);
     }
 }
 

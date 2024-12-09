@@ -302,7 +302,7 @@ impl NativeRunningKernel {
                     .update(&mut cx, |session, cx| {
                         session.kernel_errored(error_message, cx);
 
-                        cx.notify();
+                        model.notify(cx);
                     })
                     .ok();
             });
