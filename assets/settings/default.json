@@ -275,6 +275,7 @@
     // Whether to show fold buttons in the gutter.
     "folds": true
   },
+  "show_diagnostics": "all",
   "indent_guides": {
     /// Whether to show indent guides in the editor.
     "enabled": true,
