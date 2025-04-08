@@ -188,7 +188,8 @@ impl LanguageModel for CopilotChatLanguageModel {
         match self.model {
             CopilotChatModel::Claude3_5Sonnet
             | CopilotChatModel::Claude3_7Sonnet
-            | CopilotChatModel::Claude3_7SonnetThinking => true,
+            | CopilotChatModel::Claude3_7SonnetThinking
+            | CopilotChatModel::Gpt40 => true,
             _ => false,
         }
     }
