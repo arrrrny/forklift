@@ -13,6 +13,7 @@ use crate::{
         anthropic::AnthropicSettings,
         cloud::{self, ZedDotDevSettings},
         copilot_chat::CopilotChatSettings,
+        deepseek::DeepSeekSettings,
         google::GoogleSettings,
         ollama::OllamaSettings,
         open_ai::OpenAiSettings,
@@ -44,7 +45,6 @@ pub fn init(fs: Arc<dyn Fs>, cx: &mut AppContext) {
     {
         update_settings_file::<AllLanguageModelSettings>(fs, cx, move |setting, _| {
             if let Some(settings) = setting.anthropic.clone() {
-                let (newest_version, _) = settings.upgrade();
                 setting.anthropic = Some(AnthropicSettingsContent::Versioned(
                     VersionedAnthropicSettingsContent::V1(newest_version),
                 ));
@@ -61,6 +61,7 @@ pub struct AllLanguageModelSettings {
     pub zed_dot_dev: ZedDotDevSettings,
     pub google: GoogleSettings,
     pub copilot_chat: CopilotChatSettings,
+    pub deepseek: DeepSeekSettings,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -72,6 +73,7 @@ pub struct AllLanguageModelSettingsContent {
     pub zed_dot_dev: Option<ZedDotDevSettingsContent>,
     pub google: Option<GoogleSettingsContent>,
     pub copilot_chat: Option<CopilotChatSettingsContent>,
+    pub deepseek: Option<DeepSeekSettingsContent>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -241,6 +243,21 @@ pub struct CopilotChatSettingsContent {
     low_speed_timeout_in_seconds: Option<u64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct DeepSeekSettingsContent {
+    pub api_url: Option<String>,
+    pub low_speed_timeout_in_seconds: Option<u64>,
+    pub available_models: Option<Vec<DeepSeekAvailableModel>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct DeepSeekAvailableModel {
+    pub name: String,
+    pub display_name: Option<String>,
+    pub max_tokens: usize,
+    pub max_output_tokens: Option<u32>,
+}
+
 impl settings::Settings for AllLanguageModelSettings {
     const KEY: Option<&'static str> = Some("language_models");
 
@@ -373,6 +390,27 @@ impl settings::Settings for AllLanguageModelSettings {
                 settings.copilot_chat.low_speed_timeout =
                     Some(Duration::from_secs(low_speed_timeout));
             }
+
+            // DeepSeek
+            merge(
+                &mut settings.deepseek.api_url,
+                value.deepseek.as_ref().and_then(|s| s.api_url.clone()),
+            );
+            if let Some(low_speed_timeout_in_seconds) = value
+                .deepseek
+                .as_ref()
+                .and_then(|s| s.low_speed_timeout_in_seconds)
+            {
+                settings.deepseek.low_speed_timeout =
+                    Some(Duration::from_secs(low_speed_timeout_in_seconds));
+            }
+            merge(
+                &mut settings.deepseek.available_models,
+                value
+                    .deepseek
+                    .as_ref()
+                    .and_then(|s| s.available_models.clone()),
+            );
         }
 
         Ok(settings)

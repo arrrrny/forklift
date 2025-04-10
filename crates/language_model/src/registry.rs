@@ -1,12 +1,9 @@
 use crate::provider::cloud::RefreshLlmTokenListener;
-use crate::{
-    provider::{
-        anthropic::AnthropicLanguageModelProvider, cloud::CloudLanguageModelProvider,
-        copilot_chat::CopilotChatLanguageModelProvider, google::GoogleLanguageModelProvider,
-        ollama::OllamaLanguageModelProvider, open_ai::OpenAiLanguageModelProvider,
-    },
-    LanguageModel, LanguageModelId, LanguageModelProvider, LanguageModelProviderId,
-    LanguageModelProviderState,
+use crate::provider::{
+    anthropic::AnthropicLanguageModelProvider, cloud::CloudLanguageModelProvider,
+    copilot_chat::CopilotChatLanguageModelProvider, deepseek::DeepSeekLanguageModelProvider,
+    google::GoogleLanguageModelProvider, ollama::OllamaLanguageModelProvider,
+    open_ai::OpenAiLanguageModelProvider,
 };
 use client::{Client, UserStore};
 use collections::BTreeMap;
@@ -47,6 +44,10 @@ fn register_language_model_providers(
     );
     registry.register_provider(
         GoogleLanguageModelProvider::new(client.http_client(), cx),
+        cx,
+    );
+    registry.register_provider(
+        DeepSeekLanguageModelProvider::new(client.http_client(), cx),
         cx,
     );
     registry.register_provider(CopilotChatLanguageModelProvider::new(cx), cx);
