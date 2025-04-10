@@ -246,6 +246,7 @@ pub struct CopilotChatSettingsContent {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct DeepSeekSettingsContent {
     pub api_url: Option<String>,
+    pub api_key: Option<String>,  // Add this field
     pub low_speed_timeout_in_seconds: Option<u64>,
     pub available_models: Option<Vec<DeepSeekAvailableModel>>,
 }
