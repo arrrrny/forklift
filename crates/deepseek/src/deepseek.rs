@@ -121,6 +121,8 @@ pub struct Request {
     pub response_format: Option<ResponseFormat>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDefinition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -140,8 +142,8 @@ pub enum ToolDefinition {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FunctionDefinition {
     pub name: String,
-    pub description: Option<String>,
-    pub parameters: Option<Value>,
+    pub description: String,
+    pub parameters: Value,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -250,6 +252,21 @@ pub struct ToolCallChunk {
 pub struct FunctionChunk {
     pub name: Option<String>,
     pub arguments: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "any")]
+    Any,
+    Function { function: FunctionChoice },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FunctionChoice {
+    pub name: String,
 }
 
 pub async fn stream_completion(
