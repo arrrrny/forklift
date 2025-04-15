@@ -502,6 +502,19 @@ pub fn into_deepseek(
         });
         acc
     });
+    // Always include all tools and set tool_choice to auto if tools are present
+    let tools: Vec<deepseek::ToolDefinition> = request.tools.into_iter().map(|tool| deepseek::ToolDefinition::Function {
+        function: deepseek::FunctionDefinition {
+            name: tool.name,
+            description: Some(tool.description),
+            parameters: Some(tool.input_schema),
+        },
+    }).collect();
+    let tool_choice = if !tools.is_empty() {
+        Some(deepseek::ToolChoice::Auto)
+    } else {
+        None
+    };
     deepseek::Request {
         model,
         messages: merged_messages,
@@ -515,17 +528,8 @@ pub fn into_deepseek(
             request.temperature
         },
         response_format: None,
-        tools: if is_chat {
-            request.tools.into_iter().map(|tool| deepseek::ToolDefinition::Function {
-                function: deepseek::FunctionDefinition {
-                    name: tool.name,
-                    description: Some(tool.description),
-                    parameters: Some(tool.input_schema),
-                },
-            }).collect()
-        } else {
-            Vec::new()
-        },
+        tools,
+        tool_choice,
     }
 }
 
