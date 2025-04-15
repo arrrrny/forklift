@@ -285,12 +285,15 @@ fn map_deepseek_to_events(
     struct State {
         stream: BoxStream<'static, Result<deepseek::StreamResponse>>,
         tool_calls_by_index: HashMap<usize, RawToolCall>,
+        // Track incomplete tool calls to handle streaming better
+        incomplete_tool_processing: bool,
     }
 
     futures::stream::unfold(
         State {
             stream,
             tool_calls_by_index: HashMap::default(),
+            incomplete_tool_processing: false,
         },
         |mut state| async move {
             while let Some(response) = state.stream.next().await {
@@ -301,11 +304,11 @@ fn map_deepseek_to_events(
                             let delta = choice.delta;
                             let finish_reason = choice.finish_reason;
 
-                            if let Some(content) = delta.content {
-                                events.push(Ok(LanguageModelCompletionEvent::Text(content)));
-                            }
-
+                            // Process tool calls with higher priority than content
+                            // This helps ensure tools are processed completely
                             if let Some(tool_calls) = delta.tool_calls {
+                                state.incomplete_tool_processing = true;
+                                
                                 for tool_call in tool_calls {
                                     let index = tool_call.index;
                                     let entry = state
@@ -319,13 +322,66 @@ fn map_deepseek_to_events(
 
                                     if let Some(function) = tool_call.function {
                                         if let Some(name) = function.name {
+                                            // Clone the name before using it in the log message
+                                            let name_for_log = name.clone();
                                             entry.name = name;
+                                            
+                                            // Log that we're processing a tool call to help with debugging
+                                            log::info!("DeepSeek processing tool call: {}", name_for_log);
                                         }
                                         if let Some(arguments) = function.arguments {
                                             entry.arguments.push_str(&arguments);
                                         }
                                     }
                                 }
+                                
+                                // If we get a finish reason and are in tool processing mode,
+                                // make sure to emit the tool events even without an explicit tool_calls finish reason
+                                if let Some(reason) = finish_reason.clone() {
+                                    if reason == "stop" && state.incomplete_tool_processing && !state.tool_calls_by_index.is_empty() {
+                                        // Override the finish reason to handle cases where the model doesn't correctly 
+                                        // signal tool_calls completion
+                                        log::info!("DeepSeek overriding finish reason from 'stop' to 'tool_calls' due to incomplete tool processing");
+                                        
+                                        // Emit tool use events and then proceed with normal handling
+                                        let tool_events = state
+                                            .tool_calls_by_index
+                                            .drain()
+                                            .map(|(_, tool_call)| {
+                                                match serde_json::from_str(&tool_call.arguments) {
+                                                    Ok(input) => {
+                                                        let name_clone = tool_call.name.clone();
+                                                        log::info!("DeepSeek emitting tool use event for: {}", name_clone);
+                                                        Ok(LanguageModelCompletionEvent::ToolUse(
+                                                            LanguageModelToolUse {
+                                                                id: tool_call.id.into(),
+                                                                name: tool_call.name.into(),
+                                                                input,
+                                                            }
+                                                        ))
+                                                    },
+                                                    Err(e) => {
+                                                        log::error!("Failed to parse tool arguments: {} - Arguments: {}", e, tool_call.arguments);
+                                                        Err(anyhow::anyhow!("Failed to parse tool call arguments: {}", e))
+                                                    },
+                                                }
+                                            })
+                                            .collect::<Vec<_>>();
+                                            
+                                        events.extend(tool_events);
+                                        events.push(Ok(LanguageModelCompletionEvent::Stop(
+                                            StopReason::ToolUse,
+                                        )));
+                                        
+                                        state.incomplete_tool_processing = false;
+                                        return Some((events, state));
+                                    }
+                                }
+                            }
+
+                            // Process text content after handling tools
+                            if let Some(content) = delta.content {
+                                events.push(Ok(LanguageModelCompletionEvent::Text(content)));
                             }
 
                             if let Some(reason) = finish_reason {
@@ -341,14 +397,21 @@ fn map_deepseek_to_events(
                                             .drain()
                                             .map(|(_, tool_call)| {
                                                 match serde_json::from_str(&tool_call.arguments) {
-                                                    Ok(input) => Ok(LanguageModelCompletionEvent::ToolUse(
-                                                        LanguageModelToolUse {
-                                                            id: tool_call.id.into(),
-                                                            name: tool_call.name.into(),
-                                                            input,
-                                                        }
-                                                    )),
-                                                    Err(e) => Err(anyhow::anyhow!("Failed to parse tool call arguments: {}", e)),
+                                                    Ok(input) => {
+                                                        let name_clone = tool_call.name.clone();
+                                                        log::info!("DeepSeek emitting tool use event for: {}", name_clone);
+                                                        Ok(LanguageModelCompletionEvent::ToolUse(
+                                                            LanguageModelToolUse {
+                                                                id: tool_call.id.into(),
+                                                                name: tool_call.name.into(),
+                                                                input,
+                                                            }
+                                                        ))
+                                                    },
+                                                    Err(e) => {
+                                                        log::error!("Failed to parse tool arguments: {} - Arguments: {}", e, tool_call.arguments);
+                                                        Err(anyhow::anyhow!("Failed to parse tool call arguments: {}", e))
+                                                    },
                                                 }
                                             })
                                             .collect::<Vec<_>>();
@@ -356,6 +419,7 @@ fn map_deepseek_to_events(
                                         events.push(Ok(LanguageModelCompletionEvent::Stop(
                                             StopReason::ToolUse,
                                         )));
+                                        state.incomplete_tool_processing = false;
                                     }
                                     _ => {
                                         log::error!("Unexpected finish reason: {}", reason);
@@ -466,10 +530,44 @@ pub fn into_deepseek(
 ) -> deepseek::Request {
     let is_reasoner = model == "deepseek-reasoner";
     let is_chat = model == "deepseek-chat";
+    let custom_model = !is_reasoner && !is_chat;
     let len = request.messages.len();
+    
+    // Determine if there are any tools in the request
+    let has_tools = !request.tools.is_empty();
+    
+    // Enhanced message conversion with tool history handling
     let merged_messages = request.messages.into_iter().fold(Vec::with_capacity(len), |mut acc, msg| {
         let role = msg.role;
         let content = msg.string_contents();
+        
+        // Extract any tool-related messages for proper conversion
+        let mut tool_calls = Vec::new();
+        
+        for content_item in &msg.content {
+            if let language_model::MessageContent::ToolUse(tool_use) = content_item {
+                // Build proper tool call representation
+                let arguments = match serde_json::to_string(&tool_use.input) {
+                    Ok(args) => args,
+                    Err(e) => {
+                        log::error!("Failed to serialize tool arguments: {}", e);
+                        "{}".to_string()
+                    }
+                };
+                
+                tool_calls.push(deepseek::ToolCall {
+                    id: tool_use.id.to_string(),
+                    content: deepseek::ToolCallContent::Function {
+                        function: deepseek::FunctionContent {
+                            name: tool_use.name.to_string(),
+                            arguments,
+                        },
+                    },
+                });
+            }
+        }
+        
+        // Special handling for reasoner model
         if is_reasoner {
             if let Some(last_msg) = acc.last_mut() {
                 match (last_msg, role) {
@@ -492,40 +590,94 @@ pub fn into_deepseek(
                 }
             }
         }
-        acc.push(match role {
-            Role::User => deepseek::RequestMessage::User { content },
-            Role::Assistant => deepseek::RequestMessage::Assistant {
-                content: Some(content),
-                tool_calls: Vec::new(),
+        
+        // Convert messages with enhanced tool call handling
+        match role {
+            Role::User => {
+                acc.push(deepseek::RequestMessage::User { content });
             },
-            Role::System => deepseek::RequestMessage::System { content },
-        });
+            Role::Assistant => {
+                // Only include non-empty tool_calls
+                acc.push(deepseek::RequestMessage::Assistant {
+                    content: if content.is_empty() { None } else { Some(content) },
+                    tool_calls,
+                });
+            },
+            Role::System => {
+                // For models like Chat or custom models, ensure clear instructions about tools
+                if (is_chat || custom_model) && has_tools {
+                    // Add tool usage instructions to system messages
+                    let enhanced_content = if content.contains("tool") || content.contains("function") {
+                        // If the system message already mentions tools, keep it
+                        content
+                    } else {
+                        // Otherwise, add specific instructions about tools
+                        format!("{} You have access to tools/functions that you should use when appropriate. \
+                        When a user's request requires using a tool, call the appropriate tool instead of \
+                        generating fake results or refusing to use the tool. Analyze the request carefully \
+                        and determine whether a tool would help answer it properly.", content)
+                    };
+                    acc.push(deepseek::RequestMessage::System { content: enhanced_content });
+                } else {
+                    acc.push(deepseek::RequestMessage::System { content });
+                }
+            },
+        };
+        
         acc
     });
+    
+    // Clone tools for use in the request to avoid ownership issues
+    let tools_clone = request.tools.clone();
+    
+    // Create proper tool definitions with enhanced descriptions
+    let tools = if is_chat || custom_model {
+        tools_clone.into_iter().map(|tool| {
+            // Create more descriptive tool definitions
+            let enhanced_description = if tool.description.contains("parameters") || tool.description.contains("argument") {
+                tool.description
+            } else {
+                format!("{} Use this tool by providing the required parameters in the correct format.", 
+                        tool.description)
+            };
+            
+            deepseek::ToolDefinition::Function {
+                function: deepseek::FunctionDefinition {
+                    name: tool.name,
+                    description: Some(enhanced_description),
+                    parameters: Some(tool.input_schema),
+                },
+            }
+        }).collect()
+    } else {
+        Vec::new()
+    };
+    
+    // Create the DeepSeek request with appropriate settings based on model type
     deepseek::Request {
         model,
         messages: merged_messages,
         stream: true,
         max_tokens: max_output_tokens,
         temperature: if is_chat {
-            Some(0.0)
+            // Lower temperature for tool usage to make it more precise
+            if has_tools {
+                Some(0.2) 
+            } else {
+                Some(0.0)
+            }
         } else if is_reasoner {
             None
         } else {
-            request.temperature
+            // For custom models with tools, adjust temperature
+            if custom_model && has_tools {
+                Some(request.temperature.unwrap_or(0.2))
+            } else {
+                request.temperature
+            }
         },
         response_format: None,
-        tools: if is_chat {
-            request.tools.into_iter().map(|tool| deepseek::ToolDefinition::Function {
-                function: deepseek::FunctionDefinition {
-                    name: tool.name,
-                    description: Some(tool.description),
-                    parameters: Some(tool.input_schema),
-                },
-            }).collect()
-        } else {
-            Vec::new()
-        },
+        tools,
     }
 }
 
