@@ -467,7 +467,7 @@ pub fn into_deepseek(
     let is_reasoner = model == "deepseek-reasoner";
 
     let len = request.messages.len();
-    let merged_messages =
+    let mut merged_messages =
         request
             .messages
             .into_iter()
@@ -520,6 +520,49 @@ pub fn into_deepseek(
                 });
                 acc
             });
+
+    // Inject system prompt if in chat mode and tools are available
+    let is_chat = matches!(model.as_str(), "deepseek-chat" | "deepseek-reasoner");
+    let has_tools = !request.tools.is_empty();
+    if is_chat && has_tools {
+        let tool_list = [
+            ("code_symbols", "Provides an outline of public code symbols in the project or detailed symbols within a specific file."),
+            ("batch_tool", "Executes multiple tool calls sequentially or concurrently."),
+            ("terminal", "Runs shell commands in the project's root directories."),
+            ("create_file", "Creates a new file with specified content."),
+            ("diagnostics", "Checks for errors and warnings in the project or a specific file."),
+            ("now", "Returns the current datetime in RFC 3339 format."),
+            ("path_search", "Searches for paths in the project matching a glob pattern."),
+            ("rename", "Renames a symbol across the codebase using semantic analysis."),
+            ("symbol_info", "Provides detailed information about code symbols (e.g., definitions, references)."),
+            ("contents", "Reads the contents of a file or directory."),
+            ("thinking", "Helps brainstorm or plan without executing actions."),
+            ("regex_search", "Searches the project for text matching a regex."),
+            ("find_replace_file", "Finds and replaces unique text in a file."),
+            ("fetch", "Fetches a URL and returns the content as Markdown."),
+            ("code_actions", "Applies refactoring or fixes to code using language servers."),
+            ("read_file", "Reads the content of a file or its symbol outline."),
+            ("puppeteer_screenshot", "Takes a screenshot of a webpage or element."),
+            ("puppeteer_select", "Selects an element in a dropdown."),
+            ("puppeteer_click", "Clicks an element on a webpage."),
+            ("puppeteer_fill", "Fills out an input field."),
+            ("puppeteer_navigate", "Navigates to a URL."),
+            ("puppeteer_hover", "Hovers over an element."),
+            ("puppeteer_evaluate", "Executes JavaScript in the browser console."),
+        ];
+        let tool_descriptions = tool_list.iter()
+            .enumerate()
+            .map(|(i, (name, desc))| format!("{}. {}: {}", i + 1, name, desc))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let system_prompt = format!(
+            "You are an AI coding assistant with access to the following tools:\n{}\nWhenever a user asks for something that can be accomplished with a tool, you MUST use the tool instead of just describing what to do. Do not ask the user to make changes manually. If a tool is available for the task, always call it directly and wait for the result.",
+            tool_descriptions
+        );
+        merged_messages.insert(0, deepseek::RequestMessage::System {
+            content: system_prompt,
+        });
+    }
 
     deepseek::Request {
         model,
