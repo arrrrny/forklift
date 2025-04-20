@@ -101,6 +101,15 @@ impl LanguageModelProvider for CopilotChatLanguageModelProvider {
         }) as Arc<dyn LanguageModel>)
     }
 
+    fn default_fast_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
+        // Return a faster model if available, otherwise default to the standard model
+        let model = CopilotChatModel::Gpt3_5Turbo; // Using GPT-3.5 as it's typically faster
+        Some(Arc::new(CopilotChatLanguageModel {
+            model,
+            request_limiter: RateLimiter::new(4),
+        }) as Arc<dyn LanguageModel>)
+    }
+
     fn provided_models(&self, _cx: &App) -> Vec<Arc<dyn LanguageModel>> {
         CopilotChatModel::iter()
             .map(|model| {
@@ -188,7 +197,11 @@ impl LanguageModel for CopilotChatLanguageModel {
         match self.model {
             CopilotChatModel::Claude3_5Sonnet
             | CopilotChatModel::Claude3_7Sonnet
-            | CopilotChatModel::Claude3_7SonnetThinking => true,
+            | CopilotChatModel::Claude3_7SonnetThinking
+            | CopilotChatModel::Gpt4_1
+            | CopilotChatModel::O1
+            | CopilotChatModel::O3Mini
+            | CopilotChatModel::O4Mini => true,
             _ => false,
         }
     }
@@ -242,7 +255,17 @@ impl LanguageModel for CopilotChatLanguageModel {
         cx: &AsyncApp,
     ) -> BoxFuture<'static, Result<BoxStream<'static, Result<LanguageModelCompletionEvent>>>> {
         if let Some(message) = request.messages.last() {
-            if message.contents_empty() {
+            // Check if the last message has any non-empty content
+            let has_valid_content = message.content.iter().any(|content| match content {
+                MessageContent::Text(text) => !text.is_empty(),
+                MessageContent::ToolResult(result) => !result.content.is_empty(),
+                MessageContent::ToolUse(_) => true, // Tool uses are always considered valid content
+                MessageContent::Image(_) => true,   // Images are always considered valid content
+                MessageContent::Thinking { .. } => true,
+                MessageContent::RedactedThinking(_) => true,
+            });
+
+            if !has_valid_content {
                 const EMPTY_PROMPT_MSG: &str =
                     "Empty prompts aren't allowed. Please provide a non-empty prompt.";
                 return futures::future::ready(Err(anyhow::anyhow!(EMPTY_PROMPT_MSG))).boxed();
@@ -361,13 +384,124 @@ pub fn map_to_language_model_completion_events(
                                 events.extend(state.tool_calls_by_index.drain().map(
                                     |(_, tool_call)| {
                                         maybe!({
+                                            // Parse the arguments
+                                            let mut arguments = serde_json::Value::from_str(
+                                                &tool_call.arguments,
+                                            )?;
+
+                                            // Special case handling for different tools
+                                            match tool_call.name.as_str() {
+                                                // For create_file: convert 'content' to 'contents'
+                                                "create_file" => {
+                                                    if let Some(obj) = arguments.as_object_mut() {
+                                                        if let Some(content) = obj.remove("content") {
+                                                            obj.insert("contents".to_string(), content);
+                                                            log::info!("Renamed 'content' to 'contents' for create_file tool");
+                                                        }
+                                                    }
+                                                },
+
+                                                // For batch_tool: fix missing 'invocations' field
+                                                "batch_tool" => {
+                                                    if let Some(obj) = arguments.as_object_mut() {
+                                                        // If API returned "calls", rename to "invocations"
+                                                        if let Some(calls) = obj.remove("calls") {
+                                                            obj.clear();
+                                                            obj.insert("invocations".to_string(), calls);
+                                                            log::info!("Moved 'calls' to 'invocations' for batch_tool");
+                                                        }
+                                                        // Otherwise ensure invocations exists
+                                                        else if !obj.contains_key("invocations") {
+                                                            // Make a copy of the current object and wrap it in invocations
+                                                            let single = serde_json::Value::Object(obj.clone());
+                                                            obj.clear();
+                                                            obj.insert("invocations".to_string(), serde_json::Value::Array(vec![single]));
+                                                            log::info!("Created 'invocations' array for batch_tool");
+                                                        }
+                                                    } else if arguments.is_array() {
+                                                        // If it's just an array, wrap it in an object with invocations field
+                                                        let array = arguments.clone();
+                                                        arguments = serde_json::json!({"invocations": array});
+                                                        log::info!("Wrapped array in 'invocations' for batch_tool");
+                                                    } else {
+                                                        // For any other value, wrap as a single invocation item
+                                                        arguments = serde_json::json!({"invocations": [arguments]});
+                                                        log::info!("Wrapped value in 'invocations' array for batch_tool");
+                                                    }
+                                                },
+
+                                                // For thinking: ensure it has a content field
+                                                "thinking" => {
+                                                    if let Some(obj) = arguments.as_object_mut() {
+                                                        // If it has 'thoughts' or 'plan' but no 'content'
+                                                        if !obj.contains_key("content") {
+                                                            let thoughts = obj.remove("thoughts")
+                                                                .and_then(|v| v.as_str().map(str::to_string))
+                                                                .unwrap_or_default();
+                                                            let plan = obj.remove("plan")
+                                                                .and_then(|v| v.as_str().map(str::to_string))
+                                                                .unwrap_or_default();
+
+                                                            let combined = if thoughts.is_empty() && plan.is_empty() {
+                                                                // If no thoughts or plan, create default content
+                                                                "Thinking about the problem...".to_string()
+                                                            } else if !thoughts.is_empty() && !plan.is_empty() {
+                                                                // If both exist, combine them
+                                                                format!("Thoughts:\n{}\n\nPlan:\n{}", thoughts, plan)
+                                                            } else if !thoughts.is_empty() {
+                                                                // Just thoughts
+                                                                thoughts
+                                                            } else {
+                                                                // Just plan
+                                                                plan
+                                                            };
+
+                                                            obj.clear();
+                                                            obj.insert("content".to_string(), serde_json::Value::String(combined));
+                                                            log::info!("Created 'content' field for thinking tool");
+                                                        }
+                                                    } else {
+                                                        // Not an object, wrap in content
+                                                        let content = if let Some(text) = arguments.as_str() {
+                                                            text.to_string()
+                                                        } else {
+                                                            format!("{}", arguments)
+                                                        };
+                                                        arguments = serde_json::json!({"content": content});
+                                                        log::info!("Wrapped value in 'content' field for thinking tool");
+                                                    }
+                                                },
+
+                                                // For path_search: ensure 'glob' parameter exists
+                                                "path_search" => {
+                                                    if let Some(obj) = arguments.as_object_mut() {
+                                                        if !obj.contains_key("glob") {
+                                                            // Look for other fields that might contain glob patterns
+                                                            for key in &["path", "pattern", "query"] {
+                                                                if let Some(value) = obj.remove(*key) {
+                                                                    obj.insert("glob".to_string(), value);
+                                                                    log::info!("Renamed '{}' to 'glob' for path_search tool", key);
+                                                                    break;
+                                                                }
+                                                            }
+
+                                                            // If still no glob, add default
+                                                            if !obj.contains_key("glob") {
+                                                                obj.insert("glob".to_string(), serde_json::Value::String("**/*".to_string()));
+                                                                log::info!("Added default 'glob' parameter for path_search tool");
+                                                            }
+                                                        }
+                                                    }
+                                                },
+
+                                                _ => {}
+                                            }
+
                                             Ok(LanguageModelCompletionEvent::ToolUse(
                                                 LanguageModelToolUse {
                                                     id: tool_call.id.into(),
                                                     name: tool_call.name.as_str().into(),
-                                                    input: serde_json::Value::from_str(
-                                                        &tool_call.arguments,
-                                                    )?,
+                                                    input: arguments,
                                                 },
                                             ))
                                         })
@@ -427,7 +561,9 @@ impl CopilotChatLanguageModel {
                     MessageContent::Text(text) => Some(text.as_str()),
                     MessageContent::ToolUse(_)
                     | MessageContent::ToolResult(_)
-                    | MessageContent::Image(_) => None,
+                    | MessageContent::Image(_)
+                    | MessageContent::Thinking { .. }
+                    | MessageContent::RedactedThinking(_) => None,
                 }) {
                     buffer.push_str(string);
                 }
@@ -446,9 +582,16 @@ impl CopilotChatLanguageModel {
                         }
                     }
 
-                    messages.push(ChatMessage::User {
-                        content: text_content,
-                    });
+                    // Ensure user messages never have empty content, which would cause API errors
+                    if !text_content.is_empty() {
+                        messages.push(ChatMessage::User {
+                            content: text_content,
+                        });
+                    } else {
+                        messages.push(ChatMessage::User {
+                            content: ".".to_string() // Minimal non-empty content to satisfy the API
+                        });
+                    }
                 }
                 Role::Assistant => {
                     let mut tool_calls = Vec::new();
@@ -475,23 +618,105 @@ impl CopilotChatLanguageModel {
                         tool_calls,
                     });
                 }
-                Role::System => messages.push(ChatMessage::System {
-                    content: message.string_contents(),
-                }),
+                Role::System => {
+                    let content = message.string_contents();
+                    // Ensure system messages never have empty content
+                    messages.push(ChatMessage::System {
+                        content: if content.is_empty() { ".".to_string() } else { content },
+                    });
+                },
             }
         }
+        // Define static tools to send with every request
+        let tool_list = [
+            (
+                "code_symbols",
+                "Provides an outline of public code symbols in the project or detailed symbols within a specific file.",
+            ),
+            (
+                "terminal",
+                "Runs shell commands in the project's root directories.",
+            ),
+            ("create_file", "Creates a new file with specified content."),
+            (
+                "diagnostics",
+                "Checks for errors and warnings in the project or a specific file.",
+            ),
+            ("now", "Returns the current datetime in RFC 3339 format."),
+            (
+                "path_search",
+                "Searches for paths in the project matching a glob pattern.",
+            ),
+            (
+                "rename",
+                "Renames a symbol across the codebase using semantic analysis.",
+            ),
+            (
+                "symbol_info",
+                "Provides detailed information about code symbols (e.g., definitions, references).",
+            ),
+            ("contents", "Reads the contents of a file or directory."),
+            (
+                "thinking",
+                "Helps brainstorm or plan without executing actions.",
+            ),
+            (
+                "regex_search",
+                "Searches the project for text matching a regex.",
+            ),
+            (
+                "find_replace_file",
+                "Finds and replaces unique text in a file.",
+            ),
+            (
+                "fetch",
+                "Fetches a URL and returns the content as Markdown.",
+            ),
+            (
+                "code_actions",
+                "Applies refactoring or fixes to code using language servers.",
+            ),
+            (
+                "read_file",
+                "Reads the content of a file or its symbol outline.",
+            ),
+        ];
 
-        let tools = request
+        // Build a mapping of tool schemas from request tools
+        let schema_by_name: HashMap<String, serde_json::Value> = request
             .tools
             .iter()
-            .map(|tool| Tool::Function {
+            .map(|tool| (tool.name.clone(), tool.input_schema.clone()))
+            .collect();
+
+        // Use tool_list with proper parameter schemas from request.tools
+        let tools: Vec<Tool> = tool_list
+            .iter()
+            .map(|(name, description)| Tool::Function {
                 function: copilot::copilot_chat::Function {
-                    name: tool.name.clone(),
-                    description: tool.description.clone(),
-                    parameters: tool.input_schema.clone(),
+                    name: name.to_string(),
+                    description: description.to_string(),
+                    // Use the actual schema if available, or empty object as fallback
+                    parameters: schema_by_name
+                        .get(&name.to_string())
+                        .cloned()
+                        .unwrap_or(serde_json::json!({})),
                 },
             })
             .collect();
+
+        let tool_choice: Option<serde_json::Value> = if !tools.is_empty()
+            && matches!(
+                model,
+                CopilotChatModel::Gpt4_1
+                    | CopilotChatModel::O1
+                    | CopilotChatModel::O3Mini
+                    | CopilotChatModel::O4Mini
+            ) {
+            Some(serde_json::json!("auto"))
+        } else {
+            None
+        };
 
         Ok(CopilotChatRequest {
             intent: true,
@@ -501,7 +726,7 @@ impl CopilotChatLanguageModel {
             model,
             messages,
             tools,
-            tool_choice: None,
+            tool_choice,
         })
     }
 }

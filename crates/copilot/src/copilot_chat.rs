@@ -161,7 +161,7 @@ pub struct Request {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Tool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<ToolChoice>,
+    pub tool_choice: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -175,14 +175,6 @@ pub struct Function {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Tool {
     Function { function: Function },
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum ToolChoice {
-    Auto,
-    Any,
-    Tool { name: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -473,6 +465,10 @@ async fn stream_completion(
     let is_streaming = request.stream;
 
     let json = serde_json::to_string(&request)?;
+    // Log the request payload
+    log::debug!("Copilot Chat Request Model: {:?}", request.model);
+    log::debug!("Copilot Chat Request JSON: {}", json);
+
     let request = request_builder.body(AsyncBody::from(json))?;
     let mut response = client.send(request).await?;
 
@@ -480,6 +476,11 @@ async fn stream_completion(
         let mut body = Vec::new();
         response.body_mut().read_to_end(&mut body).await?;
         let body_str = std::str::from_utf8(&body)?;
+        log::debug!(
+            "Copilot Chat API Error: Status {} - {}",
+            response.status(),
+            body_str
+        );
         return Err(anyhow!(
             "Failed to connect to API: {} {}",
             response.status(),
