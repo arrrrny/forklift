@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::VecDeque;
 
 use anyhow::{Result, anyhow};
 use chrono::DateTime;
@@ -177,7 +179,7 @@ pub enum Tool {
     Function { function: Function },
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum ChatMessage {
     Assistant {
@@ -197,26 +199,26 @@ pub enum ChatMessage {
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct ToolCall {
     pub id: String,
     #[serde(flatten)]
     pub content: ToolCallContent,
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ToolCallContent {
     Function { function: FunctionContent },
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct FunctionContent {
     pub name: String,
     pub arguments: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct ResponseEvent {
     pub choices: Vec<ResponseChoice>,
@@ -224,7 +226,7 @@ pub struct ResponseEvent {
     pub id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ResponseChoice {
     pub index: usize,
     pub finish_reason: Option<String>,
@@ -232,7 +234,7 @@ pub struct ResponseChoice {
     pub message: Option<ResponseDelta>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ResponseDelta {
     pub content: Option<String>,
     pub role: Option<Role>,
@@ -240,20 +242,20 @@ pub struct ResponseDelta {
     pub tool_calls: Vec<ToolCallChunk>,
 }
 
-#[derive(Deserialize, Debug, Eq, PartialEq)]
+#[derive(Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct ToolCallChunk {
     pub index: usize,
     pub id: Option<String>,
     pub function: Option<FunctionChunk>,
 }
 
-#[derive(Deserialize, Debug, Eq, PartialEq)]
+#[derive(Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct FunctionChunk {
     pub name: Option<String>,
     pub arguments: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ApiTokenResponse {
     token: String,
     expires_at: i64,
@@ -469,8 +471,8 @@ async fn stream_completion(
     log::debug!("Copilot Chat Request Model: {:?}", request.model);
     log::debug!("Copilot Chat Request JSON: {}", json);
 
-    let request = request_builder.body(AsyncBody::from(json))?;
-    let mut response = client.send(request).await?;
+    let request_obj = request_builder.body(AsyncBody::from(json))?;
+    let mut response = client.send(request_obj).await?;
 
     if !response.status().is_success() {
         let mut body = Vec::new();
@@ -490,28 +492,100 @@ async fn stream_completion(
 
     if is_streaming {
         let reader = BufReader::new(response.into_body());
+
+        // Create thread-safe structures for managing sequential tool processing
+        let processing_tool = Arc::new(AtomicBool::new(false));
+        let tool_queue = Arc::new(parking_lot::Mutex::new(VecDeque::<ResponseEvent>::new()));
+
+        // Simple sequential tool processing for all models
         Ok(reader
             .lines()
-            .filter_map(|line| async move {
-                match line {
-                    Ok(line) => {
-                        let line = line.strip_prefix("data: ")?;
-                        if line.starts_with("[DONE]") {
-                            return None;
-                        }
+            .filter_map(move |line| {
+                let processing_tool = processing_tool.clone();
+                let tool_queue = tool_queue.clone();
 
-                        match serde_json::from_str::<ResponseEvent>(line) {
-                            Ok(response) => {
-                                if response.choices.is_empty() {
-                                    None
-                                } else {
-                                    Some(Ok(response))
-                                }
+                async move {
+                    match line {
+                        Ok(line) => {
+                            // Handle empty lines
+                            if line.is_empty() {
+                                return None;
                             }
-                            Err(error) => Some(Err(anyhow!(error))),
+
+                            let line = match line.strip_prefix("data: ") {
+                                Some(content) => content,
+                                None => {
+                                    log::debug!("Invalid line format, missing data prefix: {}", line);
+                                    return None;
+                                }
+                            };
+
+                            if line.starts_with("[DONE]") {
+                                return None;
+                            }
+
+                            match serde_json::from_str::<ResponseEvent>(line) {
+                                Ok(response) => {
+                                    if response.choices.is_empty() {
+                                        return None;
+                                    }
+
+                                    // Check if this response contains a tool call
+                                    let contains_tool_call = response.choices.iter().any(|choice| {
+                                        if let Some(delta) = &choice.delta {
+                                            !delta.tool_calls.is_empty()
+                                        } else if let Some(message) = &choice.message {
+                                            !message.tool_calls.is_empty()
+                                        } else {
+                                            false
+                                        }
+                                    });
+
+                                    // If this is a tool call
+                                    if contains_tool_call {
+                                        // If already processing a tool, queue this one
+                                        if processing_tool.load(Ordering::SeqCst) {
+                                            log::debug!("Queuing tool call for sequential processing");
+                                            tool_queue.lock().push_back(response.clone());
+                                            return None;
+                                        } else {
+                                            // Start processing this tool
+                                            processing_tool.store(true, Ordering::SeqCst);
+                                            return Some(Ok(response));
+                                        }
+                                    }
+                                    // If this is a tool completion event (no tool calls)
+                                    else if processing_tool.load(Ordering::SeqCst) && !contains_tool_call {
+                                        // Mark tool processing as complete
+                                        processing_tool.store(false, Ordering::SeqCst);
+
+                                        // Return the current response
+                                        let current_response = Some(Ok(response));
+
+                                        // Check if there are queued tools to process
+                                        let mut queue = tool_queue.lock();
+                                        if !queue.is_empty() {
+                                            // Get the next tool to process and set the flag
+                                            if queue.pop_front().is_some() {
+                                                processing_tool.store(true, Ordering::SeqCst);
+                                            }
+                                        }
+
+                                        return current_response;
+                                    }
+                                    else {
+                                        // For non-tool messages, process normally
+                                        return Some(Ok(response));
+                                    }
+                                }
+                                Err(error) => {
+                                    log::debug!("Error parsing response: {} for line: {}", error, line);
+                                    Some(Err(anyhow!("Failed to parse response: {}", error)))
+                                },
+                            }
                         }
+                        Err(error) => Some(Err(anyhow!(error))),
                     }
-                    Err(error) => Some(Err(anyhow!(error))),
                 }
             })
             .boxed())
@@ -519,8 +593,19 @@ async fn stream_completion(
         let mut body = Vec::new();
         response.body_mut().read_to_end(&mut body).await?;
         let body_str = std::str::from_utf8(&body)?;
-        let response: ResponseEvent = serde_json::from_str(body_str)?;
 
-        Ok(futures::stream::once(async move { Ok(response) }).boxed())
+        // Check if the body is empty or only whitespace
+        if body_str.trim().is_empty() {
+            return Err(anyhow!("Empty response received from API"));
+        }
+
+        // Try to parse the response with additional error handling
+        match serde_json::from_str::<ResponseEvent>(body_str) {
+            Ok(response) => Ok(futures::stream::once(async move { Ok(response) }).boxed()),
+            Err(e) => {
+                log::debug!("Failed to parse response: {} for body: {}", e, body_str);
+                Err(anyhow!("Failed to parse response: {}", e))
+            }
+        }
     }
 }
