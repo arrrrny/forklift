@@ -5,12 +5,7 @@ use editor::{Editor, EditorElement, EditorStyle};
 use futures::Stream;
 
 // The existing futures import should look like:
-use futures::{
-    future::BoxFuture,
-    stream::BoxStream,
-    FutureExt,
-    StreamExt
-};
+use futures::{FutureExt, StreamExt, future::BoxFuture, stream::BoxStream};
 use gpui::{
     AnyView, AppContext as _, AsyncApp, Entity, FontStyle, Subscription, Task, TextStyle,
     WhiteSpace,
@@ -29,7 +24,7 @@ use settings::{Settings, SettingsStore};
 use std::sync::Arc;
 use theme::ThemeSettings;
 use ui::{Icon, IconName, List, prelude::*};
-use util::ResultExt;
+use util::{ResultExt, maybe};
 
 use crate::{AllLanguageModelSettings, ui::InstructionListItem};
 
@@ -150,6 +145,16 @@ impl DeepSeekLanguageModelProvider {
 
         Self { http_client, state }
     }
+
+    fn create_language_model(&self, model: deepseek::Model) -> Arc<dyn LanguageModel> {
+        Arc::new(DeepSeekLanguageModel {
+            id: LanguageModelId::from(model.id().to_string()),
+            model,
+            state: self.state.clone(),
+            http_client: self.http_client.clone(),
+            request_limiter: RateLimiter::new(4),
+        }) as Arc<dyn LanguageModel>
+    }
 }
 
 impl LanguageModelProviderState for DeepSeekLanguageModelProvider {
@@ -174,14 +179,11 @@ impl LanguageModelProvider for DeepSeekLanguageModelProvider {
     }
 
     fn default_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
-        let model = deepseek::Model::Chat;
-        Some(Arc::new(DeepSeekLanguageModel {
-            id: LanguageModelId::from(model.id().to_string()),
-            model,
-            state: self.state.clone(),
-            http_client: self.http_client.clone(),
-            request_limiter: RateLimiter::new(4),
-        }))
+        Some(self.create_language_model(deepseek::Model::default()))
+    }
+
+    fn default_fast_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
+        Some(self.create_language_model(deepseek::Model::default_fast()))
     }
 
     fn provided_models(&self, cx: &App) -> Vec<Arc<dyn LanguageModel>> {
@@ -208,15 +210,7 @@ impl LanguageModelProvider for DeepSeekLanguageModelProvider {
 
         models
             .into_values()
-            .map(|model| {
-                Arc::new(DeepSeekLanguageModel {
-                    id: LanguageModelId::from(model.id().to_string()),
-                    model,
-                    state: self.state.clone(),
-                    http_client: self.http_client.clone(),
-                    request_limiter: RateLimiter::new(4),
-                }) as Arc<dyn LanguageModel>
-            })
+            .map(|model| self.create_language_model(model))
             .collect()
     }
 
@@ -293,7 +287,7 @@ fn map_deepseek_to_events(
             tool_calls_by_index: HashMap::default(),
         },
         |mut state| async move {
-            while let Some(response) = state.stream.next().await {
+            if let Some(response) = state.stream.next().await {
                 match response {
                     Ok(response) => {
                         let mut events = Vec::new();
@@ -308,10 +302,7 @@ fn map_deepseek_to_events(
                             if let Some(tool_calls) = delta.tool_calls {
                                 for tool_call in tool_calls {
                                     let index = tool_call.index;
-                                    let entry = state
-                                        .tool_calls_by_index
-                                        .entry(index)
-                                        .or_default();
+                                    let entry = state.tool_calls_by_index.entry(index).or_default();
 
                                     if let Some(id) = tool_call.id {
                                         entry.id = id;
@@ -328,42 +319,39 @@ fn map_deepseek_to_events(
                                 }
                             }
 
-                            if let Some(reason) = finish_reason {
-                                match reason.as_str() {
-                                    "stop" => {
-                                        events.push(Ok(LanguageModelCompletionEvent::Stop(
-                                            StopReason::EndTurn,
-                                        )));
-                                    }
-                                    "tool_calls" => {
-                                        let tool_events = state
-                                            .tool_calls_by_index
-                                            .drain()
-                                            .map(|(_, tool_call)| {
-                                                match serde_json::from_str(&tool_call.arguments) {
-                                                    Ok(input) => Ok(LanguageModelCompletionEvent::ToolUse(
-                                                        LanguageModelToolUse {
-                                                            id: tool_call.id.into(),
-                                                            name: tool_call.name.into(),
-                                                            input,
-                                                        }
-                                                    )),
-                                                    Err(e) => Err(anyhow::anyhow!("Failed to parse tool call arguments: {}", e)),
-                                                }
-                                            })
-                                            .collect::<Vec<_>>();
-                                        events.extend(tool_events);
-                                        events.push(Ok(LanguageModelCompletionEvent::Stop(
-                                            StopReason::ToolUse,
-                                        )));
-                                    }
-                                    _ => {
-                                        log::error!("Unexpected finish reason: {}", reason);
-                                        events.push(Ok(LanguageModelCompletionEvent::Stop(
-                                            StopReason::EndTurn,
-                                        )));
-                                    }
+                            match finish_reason.as_deref() {
+                                Some("stop") => {
+                                    events.push(Ok(LanguageModelCompletionEvent::Stop(
+                                        StopReason::EndTurn,
+                                    )));
                                 }
+                                Some("tool_calls") => {
+                                    events.extend(state.tool_calls_by_index.drain().map(
+                                        |(_, tool_call)| {
+                                            maybe!({
+                                                Ok(LanguageModelCompletionEvent::ToolUse(
+                                                    LanguageModelToolUse {
+                                                        id: tool_call.id.into(),
+                                                        name: tool_call.name.into(),
+                                                        input: serde_json::from_str(
+                                                            &tool_call.arguments,
+                                                        )?,
+                                                    },
+                                                ))
+                                            })
+                                        },
+                                    ));
+                                    events.push(Ok(LanguageModelCompletionEvent::Stop(
+                                        StopReason::ToolUse,
+                                    )));
+                                }
+                                Some(reason) => {
+                                    log::error!("Unexpected DeepSeek finish reason: {reason}");
+                                    events.push(Ok(LanguageModelCompletionEvent::Stop(
+                                        StopReason::EndTurn,
+                                    )));
+                                }
+                                None => {}
                             }
                         }
                         return Some((events, state));
@@ -395,10 +383,7 @@ impl LanguageModel for DeepSeekLanguageModel {
     }
 
     fn supports_tools(&self) -> bool {
-        matches!(
-            self.model,
-            deepseek::Model::Chat | deepseek::Model::Reasoner
-        )
+        true
     }
 
     fn telemetry_id(&self) -> String {
@@ -466,71 +451,110 @@ pub fn into_deepseek(
 ) -> deepseek::Request {
     let is_reasoner = model == "deepseek-reasoner";
 
-    let len = request.messages.len();
-    let merged_messages =
-        request
-            .messages
-            .into_iter()
-            .fold(Vec::with_capacity(len), |mut acc, msg| {
-                let role = msg.role;
-                let content = msg.string_contents();
+    let mut messages = Vec::new();
+    for message in request.messages {
+        for content in message.content {
+            match content {
+                language_model::MessageContent::Text(text)
+                | language_model::MessageContent::Thinking { text, .. } => {
+                    messages.push(match message.role {
+                        Role::User => deepseek::RequestMessage::User { content: text },
+                        Role::Assistant => deepseek::RequestMessage::Assistant {
+                            content: Some(text),
+                            tool_calls: Vec::new(),
+                        },
+                        Role::System => deepseek::RequestMessage::System { content: text },
+                    });
+                }
+                language_model::MessageContent::RedactedThinking(_) => {}
+                language_model::MessageContent::Image(_) => {}
+                language_model::MessageContent::ToolUse(tool_use) => {
+                    let tool_call = deepseek::ToolCall {
+                        id: tool_use.id.to_string(),
+                        content: deepseek::ToolCallContent::Function {
+                            function: deepseek::FunctionContent {
+                                name: tool_use.name.to_string(),
+                                arguments: serde_json::to_string(&tool_use.input)
+                                    .unwrap_or_default(),
+                            },
+                        },
+                    };
 
-                if is_reasoner {
-                    if let Some(last_msg) = acc.last_mut() {
-                        match (last_msg, role) {
-                            (deepseek::RequestMessage::User { content: last }, Role::User) => {
-                                last.push(' ');
-                                last.push_str(&content);
-                                return acc;
-                            }
-
-                            (
-                                deepseek::RequestMessage::Assistant {
-                                    content: last_content,
-                                    ..
-                                },
-                                Role::Assistant,
-                            ) => {
-                                *last_content = last_content
-                                    .take()
-                                    .map(|c| {
-                                        let mut s =
-                                            String::with_capacity(c.len() + content.len() + 1);
-                                        s.push_str(&c);
-                                        s.push(' ');
-                                        s.push_str(&content);
-                                        s
-                                    })
-                                    .or(Some(content));
-
-                                return acc;
-                            }
-                            _ => {}
+                    if let Some(last_assistant_message) = messages.iter_mut().rfind(|message| {
+                        matches!(message, deepseek::RequestMessage::Assistant { .. })
+                    }) {
+                        if let deepseek::RequestMessage::Assistant { tool_calls, .. } =
+                            last_assistant_message
+                        {
+                            tool_calls.push(tool_call);
                         }
+                    } else {
+                        messages.push(deepseek::RequestMessage::Assistant {
+                            content: None,
+                            tool_calls: vec![tool_call],
+                        });
                     }
                 }
+                language_model::MessageContent::ToolResult(tool_result) => {
+                    messages.push(deepseek::RequestMessage::Tool {
+                        content: tool_result.content.to_string(),
+                        tool_call_id: tool_result.tool_use_id.to_string(),
+                    });
+                }
+            }
+        }
+    }
 
-                acc.push(match role {
-                    Role::User => deepseek::RequestMessage::User { content },
-                    Role::Assistant => deepseek::RequestMessage::Assistant {
-                        content: Some(content),
-                        tool_calls: Vec::new(),
-                    },
-                    Role::System => deepseek::RequestMessage::System { content },
-                });
-                acc
-            });
+    // If we're using the reasoner model, possibly merge consecutive messages of the same role
+    if is_reasoner {
+        let mut merged_messages = Vec::with_capacity(messages.len());
+        for msg in messages {
+            if let Some(last) = merged_messages.last_mut() {
+                match (last, &msg) {
+                    (
+                        deepseek::RequestMessage::User { content: last },
+                        deepseek::RequestMessage::User { content },
+                    ) => {
+                        last.push(' ');
+                        last.push_str(content);
+                        continue;
+                    }
+                    (
+                        deepseek::RequestMessage::Assistant {
+                            content: last_content,
+                            ..
+                        },
+                        deepseek::RequestMessage::Assistant {
+                            content: Some(content),
+                            ..
+                        },
+                    ) => {
+                        *last_content = last_content
+                            .take()
+                            .map(|c| {
+                                let mut s = String::with_capacity(c.len() + content.len() + 1);
+                                s.push_str(&c);
+                                s.push(' ');
+                                s.push_str(content);
+                                s
+                            })
+                            .or(Some(content.clone()));
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            merged_messages.push(msg);
+        }
+        messages = merged_messages;
+    }
 
     deepseek::Request {
         model,
-        messages: merged_messages,
+        messages,
         stream: true,
         max_tokens: max_output_tokens,
-        temperature: if is_reasoner {
-            None
-        } else {
-            Some(0.0)
-        },
+        temperature: if is_reasoner { None } else { Some(0.0) },
         response_format: None,
         tools: request
             .tools
@@ -681,7 +705,7 @@ impl Render for ConfigurationView {
                         .py_1()
                         .bg(cx.theme().colors().editor_background)
                         .border_1()
-                        .border_color(cx.theme().colors().border_variant)
+                        .border_color(cx.theme().colors().border)
                         .rounded_sm()
                         .child(self.render_api_key_editor(cx)),
                 )
@@ -696,8 +720,13 @@ impl Render for ConfigurationView {
                 .into_any()
         } else {
             h_flex()
-                .size_full()
+                .mt_1()
+                .p_1()
                 .justify_between()
+                .rounded_md()
+                .border_1()
+                .border_color(cx.theme().colors().border)
+                .bg(cx.theme().colors().background)
                 .child(
                     h_flex()
                         .gap_1()
@@ -709,8 +738,11 @@ impl Render for ConfigurationView {
                         })),
                 )
                 .child(
-                    Button::new("reset-key", "Reset")
-                        .icon(IconName::Trash)
+                    Button::new("reset-key", "Reset Key")
+                        .label_size(LabelSize::Small)
+                        .icon(Some(IconName::Trash))
+                        .icon_size(IconSize::Small)
+                        .icon_position(IconPosition::Start)
                         .disabled(env_var_set)
                         .on_click(
                             cx.listener(|this, _, window, cx| this.reset_api_key(window, cx)),
