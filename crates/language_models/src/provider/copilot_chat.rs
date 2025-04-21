@@ -389,8 +389,17 @@ pub fn map_to_language_model_completion_events(
                                                 &tool_call.arguments,
                                             )?;
 
+                                            // Normalize known tool name variants
+                                            let normalized_name = match tool_call.name.as_str() {
+                                                "find_and_replace_file" => {
+                                                    log::info!("Normalizing tool name from 'find_and_replace_file' to 'find_replace_file'");
+                                                    "find_replace_file"
+                                                },
+                                                name => name,
+                                            };
+
                                             // Special case handling for different tools
-                                            match tool_call.name.as_str() {
+                                            match normalized_name {
                                                 // For create_file: convert 'content' to 'contents'
                                                 "create_file" => {
                                                     if let Some(obj) = arguments.as_object_mut() {
@@ -500,7 +509,7 @@ pub fn map_to_language_model_completion_events(
                                             Ok(LanguageModelCompletionEvent::ToolUse(
                                                 LanguageModelToolUse {
                                                     id: tool_call.id.into(),
-                                                    name: tool_call.name.as_str().into(),
+                                                    name: normalized_name.into(),
                                                     input: arguments,
                                                 },
                                             ))
@@ -589,7 +598,7 @@ impl CopilotChatLanguageModel {
                         });
                     } else {
                         messages.push(ChatMessage::User {
-                            content: ".".to_string() // Minimal non-empty content to satisfy the API
+                            content: ".".to_string(), // Minimal non-empty content to satisfy the API
                         });
                     }
                 }
@@ -622,9 +631,13 @@ impl CopilotChatLanguageModel {
                     let content = message.string_contents();
                     // Ensure system messages never have empty content
                     messages.push(ChatMessage::System {
-                        content: if content.is_empty() { ".".to_string() } else { content },
+                        content: if content.is_empty() {
+                            ".".to_string()
+                        } else {
+                            content
+                        },
                     });
-                },
+                }
             }
         }
         // Define static tools to send with every request
