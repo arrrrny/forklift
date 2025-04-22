@@ -226,6 +226,10 @@ impl LanguageModelProvider for DeepSeekLanguageModelProvider {
     fn reset_credentials(&self, cx: &mut App) -> Task<Result<()>> {
         self.state.update(cx, |state, cx| state.reset_api_key(cx))
     }
+
+    fn default_fast_model(&self, cx: &App) -> Option<Arc<dyn LanguageModel>> {
+        self.default_model(cx)
+    }
 }
 
 pub struct DeepSeekLanguageModel {
@@ -330,8 +334,10 @@ fn map_deepseek_to_events(
                                                         id: tool_call.id.into(),
                                                         name: tool_call.name.as_str().into(),
                                                         is_input_complete: true,
-                                                        input: serde_json::Value::from_str(
-                                                            &tool_call.arguments,
+                                                        input: serde_json::from_str::<
+                                                            serde_json::Value,
+                                                        >(
+                                                            &tool_call.arguments
                                                         )?,
                                                     },
                                                 ))
