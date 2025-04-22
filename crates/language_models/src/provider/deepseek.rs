@@ -182,10 +182,6 @@ impl LanguageModelProvider for DeepSeekLanguageModelProvider {
         Some(self.create_language_model(deepseek::Model::default()))
     }
 
-    fn default_fast_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
-        Some(self.create_language_model(deepseek::Model::default_fast()))
-    }
-
     fn provided_models(&self, cx: &App) -> Vec<Arc<dyn LanguageModel>> {
         let mut models = BTreeMap::default();
 
@@ -332,8 +328,9 @@ fn map_deepseek_to_events(
                                                 Ok(LanguageModelCompletionEvent::ToolUse(
                                                     LanguageModelToolUse {
                                                         id: tool_call.id.into(),
-                                                        name: tool_call.name.into(),
-                                                        input: serde_json::from_str(
+                                                        name: tool_call.name.as_str().into(),
+                                                        is_input_complete: true,
+                                                        input: serde_json::Value::from_str(
                                                             &tool_call.arguments,
                                                         )?,
                                                     },
@@ -341,6 +338,7 @@ fn map_deepseek_to_events(
                                             })
                                         },
                                     ));
+
                                     events.push(Ok(LanguageModelCompletionEvent::Stop(
                                         StopReason::ToolUse,
                                     )));
