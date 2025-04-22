@@ -11,7 +11,7 @@ use itertools::Itertools;
 use picker::{Picker, PickerDelegate, highlighted_match_with_paths::HighlightedMatch};
 use project::{TaskSourceKind, task_store::TaskStore};
 use task::{
-    DebugRequestType, DebugTaskDefinition, ResolvedTask, RevealTarget, TaskContext, TaskModal,
+    DebugRequest, DebugTaskDefinition, ResolvedTask, RevealTarget, TaskContext, TaskModal,
     TaskTemplate, TaskType,
 };
 use ui::{
@@ -21,7 +21,7 @@ use ui::{
 };
 
 use util::{ResultExt, truncate_and_trailoff};
-use workspace::{ModalView, Workspace, tasks::schedule_resolved_task};
+use workspace::{ModalView, Workspace};
 pub use zed_actions::{Rerun, Spawn};
 
 /// A modal used to spawn new tasks.
@@ -128,9 +128,9 @@ impl TasksModalDelegate {
     }
 }
 
-pub(crate) struct TasksModal {
+pub struct TasksModal {
     picker: Entity<Picker<TasksModalDelegate>>,
-    _subscription: Subscription,
+    _subscription: [Subscription; 2],
 }
 
 impl TasksModal {
@@ -156,9 +156,16 @@ impl TasksModal {
                 cx,
             )
         });
-        let _subscription = cx.subscribe(&picker, |_, _, _, cx| {
-            cx.emit(DismissEvent);
-        });
+        let _subscription = [
+            cx.subscribe(&picker, |_, _, _: &DismissEvent, cx| {
+                cx.emit(DismissEvent);
+            }),
+            cx.subscribe(&picker, |_, _, event: &ShowAttachModal, cx| {
+                cx.emit(ShowAttachModal {
+                    debug_config: event.debug_config.clone(),
+                });
+            }),
+        ];
         Self {
             picker,
             _subscription,
@@ -179,7 +186,13 @@ impl Render for TasksModal {
     }
 }
 
+pub struct ShowAttachModal {
+    pub debug_config: DebugTaskDefinition,
+}
+
 impl EventEmitter<DismissEvent> for TasksModal {}
+impl EventEmitter<ShowAttachModal> for TasksModal {}
+impl EventEmitter<ShowAttachModal> for Picker<TasksModalDelegate> {}
 
 impl Focusable for TasksModal {
     fn focus_handle(&self, cx: &gpui::App) -> gpui::FocusHandle {
@@ -346,51 +359,44 @@ impl PickerDelegate for TasksModalDelegate {
             }
         }
 
-        self.workspace
-            .update(cx, |workspace, cx| {
-                match task.task_type() {
-                    TaskType::Debug(config) if config.locator.is_none() => {
-                        let Some(config): Option<DebugTaskDefinition> = task
-                            .resolved_debug_adapter_config()
-                            .and_then(|config| config.try_into().ok())
-                        else {
-                            return;
-                        };
-                        let project = workspace.project().clone();
-
-                        match &config.request {
-                            DebugRequestType::Attach(attach_config)
-                                if attach_config.process_id.is_none() =>
-                            {
-                                workspace.toggle_modal(window, cx, |window, cx| {
-                                    debugger_ui::attach_modal::AttachModal::new(
-                                        project,
-                                        config.clone(),
-                                        true,
-                                        window,
-                                        cx,
-                                    )
-                                });
-                            }
-                            _ => {
-                                project.update(cx, |project, cx| {
-                                    project
-                                        .start_debug_session(config.into(), cx)
-                                        .detach_and_log_err(cx);
-                                });
-                            }
-                        }
-                    }
-                    _ => schedule_resolved_task(
-                        workspace,
-                        task_source_kind,
-                        task,
-                        omit_history_entry,
-                        cx,
-                    ),
+        match task.task_type() {
+            TaskType::Debug(_) => {
+                let Some(config) = task.resolved_debug_adapter_config() else {
+                    return;
                 };
-            })
-            .ok();
+                let config = config.definition;
+
+                match &config.request {
+                    DebugRequest::Attach(attach_config) if attach_config.process_id.is_none() => {
+                        cx.emit(ShowAttachModal {
+                            debug_config: config.clone(),
+                        });
+                        return;
+                    }
+                    _ => {
+                        self.workspace
+                            .update(cx, |workspace, cx| {
+                                workspace.schedule_debug_task(task, window, cx);
+                            })
+                            .ok();
+                    }
+                }
+            }
+            TaskType::Script => {
+                self.workspace
+                    .update(cx, |workspace, cx| {
+                        workspace.schedule_resolved_task(
+                            task_source_kind,
+                            task,
+                            omit_history_entry,
+                            window,
+                            cx,
+                        );
+                    })
+                    .ok();
+            }
+        };
+
         cx.emit(DismissEvent);
     }
 
@@ -553,7 +559,7 @@ impl PickerDelegate for TasksModalDelegate {
     fn confirm_input(
         &mut self,
         omit_history_entry: bool,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Picker<Self>>,
     ) {
         let Some((task_source_kind, mut task)) = self.spawn_oneshot() else {
@@ -571,36 +577,17 @@ impl PickerDelegate for TasksModalDelegate {
         self.workspace
             .update(cx, |workspace, cx| {
                 match task.task_type() {
-                    TaskType::Script => schedule_resolved_task(
-                        workspace,
+                    TaskType::Script => workspace.schedule_resolved_task(
                         task_source_kind,
                         task,
                         omit_history_entry,
+                        window,
                         cx,
                     ),
                     // todo(debugger): Should create a schedule_resolved_debug_task function
                     // This would allow users to access to debug history and other issues
-                    TaskType::Debug(debug_args) => {
-                        let Some(debug_config) = task.resolved_debug_adapter_config() else {
-                            // todo(debugger) log an error, this should never happen
-                            return;
-                        };
-
-                        if debug_args.locator.is_some() {
-                            schedule_resolved_task(
-                                workspace,
-                                task_source_kind,
-                                task,
-                                omit_history_entry,
-                                cx,
-                            );
-                        } else {
-                            workspace.project().update(cx, |project, cx| {
-                                project
-                                    .start_debug_session(debug_config, cx)
-                                    .detach_and_log_err(cx);
-                            });
-                        }
+                    TaskType::Debug(_) => {
+                        workspace.schedule_debug_task(task, window, cx);
                     }
                 };
             })

@@ -8,16 +8,19 @@ use std::sync::atomic::AtomicBool;
 use anyhow::Result;
 use editor::{CompletionProvider, Editor, ExcerptId};
 use file_icons::FileIcons;
+use fuzzy::{StringMatch, StringMatchCandidate};
 use gpui::{App, Entity, Task, WeakEntity};
 use http_client::HttpClientWithUrl;
 use language::{Buffer, CodeLabel, HighlightId};
 use lsp::CompletionContext;
 use project::{Completion, CompletionIntent, ProjectPath, Symbol, WorktreeId};
+use prompt_store::PromptId;
 use rope::Point;
 use text::{Anchor, ToPoint};
 use ui::prelude::*;
 use workspace::Workspace;
 
+use crate::context::RULES_ICON;
 use crate::context_picker::file_context_picker::search_files;
 use crate::context_picker::symbol_context_picker::search_symbols;
 use crate::context_store::ContextStore;
@@ -25,6 +28,7 @@ use crate::thread_store::ThreadStore;
 
 use super::fetch_context_picker::fetch_url_content;
 use super::file_context_picker::FileMatch;
+use super::rules_context_picker::{RulesContextEntry, search_rules};
 use super::symbol_context_picker::SymbolMatch;
 use super::thread_context_picker::{ThreadContextEntry, ThreadMatch, search_threads};
 use super::{
@@ -37,7 +41,26 @@ pub(crate) enum Match {
     File(FileMatch),
     Thread(ThreadMatch),
     Fetch(SharedString),
-    Mode(ContextPickerMode),
+    Rules(RulesContextEntry),
+    Mode(ModeMatch),
+}
+
+pub struct ModeMatch {
+    mat: Option<StringMatch>,
+    mode: ContextPickerMode,
+}
+
+impl Match {
+    pub fn score(&self) -> f64 {
+        match self {
+            Match::File(file) => file.mat.score,
+            Match::Mode(mode) => mode.mat.as_ref().map(|mat| mat.score).unwrap_or(1.),
+            Match::Thread(_) => 1.,
+            Match::Symbol(_) => 1.,
+            Match::Fetch(_) => 1.,
+            Match::Rules(_) => 1.,
+        }
+    }
 }
 
 fn search(
@@ -94,6 +117,21 @@ fn search(
                 Task::ready(Vec::new())
             }
         }
+        Some(ContextPickerMode::Rules) => {
+            if let Some(thread_store) = thread_store.as_ref().and_then(|t| t.upgrade()) {
+                let search_rules_task =
+                    search_rules(query.clone(), cancellation_flag.clone(), thread_store, cx);
+                cx.background_spawn(async move {
+                    search_rules_task
+                        .await
+                        .into_iter()
+                        .map(Match::Rules)
+                        .collect::<Vec<_>>()
+                })
+            } else {
+                Task::ready(Vec::new())
+            }
+        }
         None => {
             if query.is_empty() {
                 let mut matches = recent_entries
@@ -126,19 +164,54 @@ fn search(
                 matches.extend(
                     supported_context_picker_modes(&thread_store)
                         .into_iter()
-                        .map(Match::Mode),
+                        .map(|mode| Match::Mode(ModeMatch { mode, mat: None })),
                 );
 
                 Task::ready(matches)
             } else {
+                let executor = cx.background_executor().clone();
+
                 let search_files_task =
                     search_files(query.clone(), cancellation_flag.clone(), &workspace, cx);
+
+                let modes = supported_context_picker_modes(&thread_store);
+                let mode_candidates = modes
+                    .iter()
+                    .enumerate()
+                    .map(|(ix, mode)| StringMatchCandidate::new(ix, mode.mention_prefix()))
+                    .collect::<Vec<_>>();
+
                 cx.background_spawn(async move {
-                    search_files_task
+                    let mut matches = search_files_task
                         .await
                         .into_iter()
                         .map(Match::File)
-                        .collect()
+                        .collect::<Vec<_>>();
+
+                    let mode_matches = fuzzy::match_strings(
+                        &mode_candidates,
+                        &query,
+                        false,
+                        100,
+                        &Arc::new(AtomicBool::default()),
+                        executor,
+                    )
+                    .await;
+
+                    matches.extend(mode_matches.into_iter().map(|mat| {
+                        Match::Mode(ModeMatch {
+                            mode: modes[mat.candidate_id],
+                            mat: Some(mat),
+                        })
+                    }));
+
+                    matches.sort_by(|a, b| {
+                        b.score()
+                            .partial_cmp(&a.score())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+
+                    matches
                 })
             }
         }
@@ -226,6 +299,60 @@ impl ContextPickerCompletionProvider {
                             .await?;
                         context_store.update(cx, |context_store, cx| {
                             context_store.add_thread(thread, false, cx)
+                        })
+                    })
+                    .detach_and_log_err(cx);
+                },
+            )),
+        }
+    }
+
+    fn completion_for_rules(
+        rules: RulesContextEntry,
+        excerpt_id: ExcerptId,
+        source_range: Range<Anchor>,
+        editor: Entity<Editor>,
+        context_store: Entity<ContextStore>,
+        thread_store: Entity<ThreadStore>,
+    ) -> Completion {
+        let new_text = MentionLink::for_rules(&rules);
+        let new_text_len = new_text.len();
+        Completion {
+            replace_range: source_range.clone(),
+            new_text,
+            label: CodeLabel::plain(rules.title.to_string(), None),
+            documentation: None,
+            insert_text_mode: None,
+            source: project::CompletionSource::Custom,
+            icon_path: Some(RULES_ICON.path().into()),
+            confirm: Some(confirm_completion_callback(
+                RULES_ICON.path().into(),
+                rules.title.clone(),
+                excerpt_id,
+                source_range.start,
+                new_text_len,
+                editor.clone(),
+                move |cx| {
+                    let prompt_uuid = rules.prompt_id;
+                    let prompt_id = PromptId::User { uuid: prompt_uuid };
+                    let context_store = context_store.clone();
+                    let Some(prompt_store) = thread_store.read(cx).prompt_store() else {
+                        log::error!("Can't add user rules as prompt store is missing.");
+                        return;
+                    };
+                    let prompt_store = prompt_store.read(cx);
+                    let Some(metadata) = prompt_store.metadata(prompt_id) else {
+                        return;
+                    };
+                    let Some(title) = metadata.title else {
+                        return;
+                    };
+                    let text_task = prompt_store.load(prompt_id, cx);
+
+                    cx.spawn(async move |cx| {
+                        let text = text_task.await?;
+                        context_store.update(cx, |context_store, cx| {
+                            context_store.add_rules(prompt_uuid, title, text, false, cx)
                         })
                     })
                     .detach_and_log_err(cx);
@@ -540,6 +667,17 @@ impl CompletionProvider for ContextPickerCompletionProvider {
                                 thread_store,
                             ))
                         }
+                        Match::Rules(user_rules) => {
+                            let thread_store = thread_store.as_ref().and_then(|t| t.upgrade())?;
+                            Some(Self::completion_for_rules(
+                                user_rules,
+                                excerpt_id,
+                                source_range.clone(),
+                                editor.clone(),
+                                context_store.clone(),
+                                thread_store,
+                            ))
+                        }
                         Match::Fetch(url) => Some(Self::completion_for_fetch(
                             source_range.clone(),
                             url,
@@ -548,7 +686,7 @@ impl CompletionProvider for ContextPickerCompletionProvider {
                             context_store.clone(),
                             http_client.clone(),
                         )),
-                        Match::Mode(mode) => {
+                        Match::Mode(ModeMatch { mode, .. }) => {
                             Some(Self::completion_for_mode(source_range.clone(), mode))
                         }
                     })
@@ -610,21 +748,20 @@ fn confirm_completion_callback(
     editor: Entity<Editor>,
     add_context_fn: impl Fn(&mut App) -> () + Send + Sync + 'static,
 ) -> Arc<dyn Fn(CompletionIntent, &mut Window, &mut App) -> bool + Send + Sync> {
-    Arc::new(move |_, window, cx| {
+    Arc::new(move |_, _, cx| {
         add_context_fn(cx);
 
         let crease_text = crease_text.clone();
         let crease_icon_path = crease_icon_path.clone();
         let editor = editor.clone();
-        window.defer(cx, move |window, cx| {
-            crate::context_picker::insert_crease_for_mention(
+        cx.defer(move |cx| {
+            crate::context_picker::insert_fold_for_mention(
                 excerpt_id,
                 start,
                 content_len,
                 crease_text,
                 crease_icon_path,
                 editor,
-                window,
                 cx,
             );
         });
@@ -694,6 +831,7 @@ impl MentionCompletion {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use editor::AnchorRangeExt;
     use gpui::{EventEmitter, FocusHandle, Focusable, TestAppContext, VisualTestContext};
     use project::{Project, ProjectPath};
     use serde_json::json;
@@ -874,7 +1012,7 @@ mod tests {
         let editor = workspace.update_in(&mut cx, |workspace, window, cx| {
             let editor = cx.new(|cx| {
                 Editor::new(
-                    editor::EditorMode::Full,
+                    editor::EditorMode::full(),
                     multi_buffer::MultiBuffer::build_simple("", cx),
                     None,
                     window,
@@ -967,7 +1105,7 @@ mod tests {
             assert_eq!(editor.text(cx), "Lorem [@one.txt](@file:dir/a/one.txt)",);
             assert!(!editor.has_visible_completions_menu());
             assert_eq!(
-                crease_ranges(editor, cx),
+                fold_ranges(editor, cx),
                 vec![Point::new(0, 6)..Point::new(0, 37)]
             );
         });
@@ -978,7 +1116,7 @@ mod tests {
             assert_eq!(editor.text(cx), "Lorem [@one.txt](@file:dir/a/one.txt) ",);
             assert!(!editor.has_visible_completions_menu());
             assert_eq!(
-                crease_ranges(editor, cx),
+                fold_ranges(editor, cx),
                 vec![Point::new(0, 6)..Point::new(0, 37)]
             );
         });
@@ -992,7 +1130,7 @@ mod tests {
             );
             assert!(!editor.has_visible_completions_menu());
             assert_eq!(
-                crease_ranges(editor, cx),
+                fold_ranges(editor, cx),
                 vec![Point::new(0, 6)..Point::new(0, 37)]
             );
         });
@@ -1006,7 +1144,7 @@ mod tests {
             );
             assert!(editor.has_visible_completions_menu());
             assert_eq!(
-                crease_ranges(editor, cx),
+                fold_ranges(editor, cx),
                 vec![Point::new(0, 6)..Point::new(0, 37)]
             );
         });
@@ -1024,7 +1162,7 @@ mod tests {
             );
             assert!(!editor.has_visible_completions_menu());
             assert_eq!(
-                crease_ranges(editor, cx),
+                fold_ranges(editor, cx),
                 vec![
                     Point::new(0, 6)..Point::new(0, 37),
                     Point::new(0, 44)..Point::new(0, 79)
@@ -1041,7 +1179,7 @@ mod tests {
             );
             assert!(editor.has_visible_completions_menu());
             assert_eq!(
-                crease_ranges(editor, cx),
+                fold_ranges(editor, cx),
                 vec![
                     Point::new(0, 6)..Point::new(0, 37),
                     Point::new(0, 44)..Point::new(0, 79)
@@ -1062,7 +1200,7 @@ mod tests {
             );
             assert!(!editor.has_visible_completions_menu());
             assert_eq!(
-                crease_ranges(editor, cx),
+                fold_ranges(editor, cx),
                 vec![
                     Point::new(0, 6)..Point::new(0, 37),
                     Point::new(0, 44)..Point::new(0, 79),
@@ -1072,15 +1210,13 @@ mod tests {
         });
     }
 
-    fn crease_ranges(editor: &Editor, cx: &mut App) -> Vec<Range<Point>> {
+    fn fold_ranges(editor: &Editor, cx: &mut App) -> Vec<Range<Point>> {
         let snapshot = editor.buffer().read(cx).snapshot(cx);
         editor.display_map.update(cx, |display_map, cx| {
             display_map
                 .snapshot(cx)
-                .crease_snapshot
-                .crease_items_with_offsets(&snapshot)
-                .into_iter()
-                .map(|(_, range)| range)
+                .folds_in_range(0..snapshot.len())
+                .map(|fold| fold.range.to_point(&snapshot))
                 .collect()
         })
     }
