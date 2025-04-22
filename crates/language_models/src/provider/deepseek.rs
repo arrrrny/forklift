@@ -387,7 +387,10 @@ impl LanguageModel for DeepSeekLanguageModel {
     }
 
     fn supports_tools(&self) -> bool {
-        true
+        match &self.model {
+            deepseek::Model::Reasoner => false,
+            _ => true,
+        }
     }
 
     fn telemetry_id(&self) -> String {
