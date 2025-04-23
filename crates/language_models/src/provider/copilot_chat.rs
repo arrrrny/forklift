@@ -534,11 +534,8 @@ impl CopilotChatLanguageModel {
 
             match message.role {
                 Role::User => {
-                    let mut has_tool_result = false;
-
                     for content in &message.content {
                         if let MessageContent::ToolResult(tool_result) = content {
-                            has_tool_result = true;
                             messages.push(ChatMessage::Tool {
                                 tool_call_id: tool_result.tool_use_id.to_string(),
                                 content: tool_result.content.to_string(),
@@ -547,7 +544,7 @@ impl CopilotChatLanguageModel {
                     }
 
                     // Add a placeholder text if there's no text content but there are tool results
-                    if has_tool_result && text_content.is_empty() {
+                    if text_content.is_empty() {
                         text_content = "Continue the conversation.".to_string();
                     }
 
