@@ -64,6 +64,18 @@ impl Model {
     pub fn default_fast() -> Self {
         Self::Claude3_7Sonnet
     }
+    pub fn is_openai_model(&self) -> bool {
+        matches!(
+            self,
+            Self::Gpt4_1
+                | Self::O1
+                | Self::O3Mini
+                | Self::O4Mini
+                | Self::Gpt3_5Turbo
+                | Self::Gpt4
+                | Self::Gpt4o
+        )
+    }
 
     pub fn uses_streaming(&self) -> bool {
         match self {
@@ -182,11 +194,20 @@ pub enum Tool {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(untagged)]
 pub enum ToolChoice {
+    #[serde(rename = "auto")]
     Auto,
-    Any,
-    Tool { name: String },
+    Tool {
+        #[serde(rename = "type")]
+        kind: String,
+        function: FunctionToolChoice,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct FunctionToolChoice {
+    pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
