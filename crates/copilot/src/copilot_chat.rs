@@ -39,10 +39,8 @@ pub enum Model {
     Gpt3_5Turbo,
     #[serde(alias = "o1", rename = "o1")]
     O1,
-    #[serde(alias = "o1-mini", rename = "o3-mini")]
+    #[serde(alias = "o3-mini", rename = "o3-mini")]
     O3Mini,
-    #[serde(alias = "o3", rename = "o3")]
-    O3,
     #[serde(alias = "o4-mini", rename = "o4-mini")]
     O4Mini,
     #[serde(alias = "claude-3-5-sonnet", rename = "claude-3.5-sonnet")]
@@ -83,12 +81,12 @@ impl Model {
             | Self::Gpt4
             | Self::Gpt4_1
             | Self::Gpt3_5Turbo
-            | Self::O3
+            | Self::O3Mini
             | Self::O4Mini
             | Self::Claude3_5Sonnet
             | Self::Claude3_7Sonnet
             | Self::Claude3_7SonnetThinking => true,
-            Self::O3Mini | Self::O1 | Self::Gemini20Flash | Self::Gemini25Pro => false,
+            Self::O1 | Self::Gemini20Flash | Self::Gemini25Pro => false,
         }
     }
 
@@ -100,7 +98,6 @@ impl Model {
             "gpt-3.5-turbo" => Ok(Self::Gpt3_5Turbo),
             "o1" => Ok(Self::O1),
             "o3-mini" => Ok(Self::O3Mini),
-            "o3" => Ok(Self::O3),
             "o4-mini" => Ok(Self::O4Mini),
             "claude-3-5-sonnet" => Ok(Self::Claude3_5Sonnet),
             "claude-3-7-sonnet" => Ok(Self::Claude3_7Sonnet),
@@ -119,7 +116,6 @@ impl Model {
             Self::Gpt4o => "gpt-4o",
             Self::O3Mini => "o3-mini",
             Self::O1 => "o1",
-            Self::O3 => "o3",
             Self::O4Mini => "o4-mini",
             Self::Claude3_5Sonnet => "claude-3-5-sonnet",
             Self::Claude3_7Sonnet => "claude-3-7-sonnet",
@@ -137,7 +133,6 @@ impl Model {
             Self::Gpt4o => "GPT-4o",
             Self::O3Mini => "o3-mini",
             Self::O1 => "o1",
-            Self::O3 => "o3",
             Self::O4Mini => "o4-mini",
             Self::Claude3_5Sonnet => "Claude 3.5 Sonnet",
             Self::Claude3_7Sonnet => "Claude 3.7 Sonnet",
@@ -155,7 +150,6 @@ impl Model {
             Self::Gpt3_5Turbo => 12_288,
             Self::O3Mini => 64_000,
             Self::O1 => 20_000,
-            Self::O3 => 128_000,
             Self::O4Mini => 128_000,
             Self::Claude3_5Sonnet => 200_000,
             Self::Claude3_7Sonnet => 90_000,
