@@ -703,9 +703,10 @@ dependencies = [
  "anyhow",
  "assistant_tool",
  "chrono",
+ "client",
+ "clock",
  "collections",
  "component",
- "feature_flags",
  "futures 0.3.31",
  "gpui",
  "html_to_markdown",
@@ -16631,7 +16632,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "client",
- "feature_flags",
  "futures 0.3.31",
  "gpui",
  "http_client",
@@ -18209,7 +18209,7 @@ dependencies = [
 
 [[package]]
 name = "zed"
-version = "0.184.0"
+version = "0.185.0"
 dependencies = [
  "activity_indicator",
  "agent",
