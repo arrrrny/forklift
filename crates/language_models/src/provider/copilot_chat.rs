@@ -1,3 +1,4 @@
+use copilot::copilot_chat::ToolChoice;
 use std::pin::Pin;
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -169,6 +170,69 @@ pub struct CopilotChatLanguageModel {
     request_limiter: RateLimiter,
 }
 
+impl CopilotChatLanguageModel {
+    fn get_tool_choice(&self) -> Option<ToolChoice> {
+        if self.model.is_openai_model() {
+            Some(ToolChoice::Auto)
+        } else {
+            None
+        }
+    }
+
+    fn convert_tools(&self, request: &LanguageModelRequest) -> Vec<Tool> {
+        // First build schema map from request tools
+        let schema_map: HashMap<String, serde_json::Value> = request
+            .tools
+            .iter()
+            .map(|tool| (tool.name.clone(), tool.input_schema.clone()))
+            .collect();
+
+        // Then create tools with proper schemas
+        request
+            .tools
+            .iter()
+            .map(|tool| {
+                // if tool.name == "code_symbols"
+                //     || tool.name == "code_actions"
+                //     || tool.name == "edit_file"
+                // {
+                //     // Provide a simplified schema and description
+                //     return Tool::Function {
+                //         function: copilot::copilot_chat::Function {
+                //             name: tool.name.clone(),
+                //             description: format!("Tool for {}", tool.name), // Simplified description
+                //             parameters: serde_json::json!({
+                //                 "type": "object",
+                //                 "properties": {
+                //                     "path": {"type": "string", "description": "File path"}
+                //                 },
+                //                 "required": ["path"]
+                //             }),
+                //         },
+                //     };
+                // }
+                // Get the schema from our map (guaranteed to exist since we built it from these tools)
+                let parameters = schema_map.get(&tool.name).cloned().unwrap_or_else(|| {
+                    log::warn!("Missing schema for tool {}, using empty schema", tool.name);
+                    serde_json::json!({})
+                });
+
+                let tool_name = match tool.name.as_str() {
+                    name => name.to_string(),
+                };
+
+                Tool::Function {
+                    function: copilot::copilot_chat::Function {
+                        name: tool_name,
+                        description: tool.description.clone(),
+                        parameters: ensure_valid_schema(parameters),
+                    },
+                }
+            })
+            .collect()
+    }
+}
+
 impl LanguageModel for CopilotChatLanguageModel {
     fn id(&self) -> LanguageModelId {
         LanguageModelId::from(self.model.id().to_string())
@@ -188,7 +252,11 @@ impl LanguageModel for CopilotChatLanguageModel {
 
     fn supports_tools(&self) -> bool {
         match self.model {
-            CopilotChatModel::Claude3_5Sonnet
+            CopilotChatModel::Gpt4_1
+            | CopilotChatModel::O4Mini
+            | CopilotChatModel::Gpt4o
+            | CopilotChatModel::O3Mini
+            | CopilotChatModel::Claude3_5Sonnet
             | CopilotChatModel::Claude3_7Sonnet
             | CopilotChatModel::Claude3_7SonnetThinking => true,
             _ => false,
@@ -285,7 +353,7 @@ impl LanguageModel for CopilotChatLanguageModel {
             }
         }
 
-        let copilot_request = match self.to_copilot_chat_request(request) {
+        let copilot_request = match self.to_copilot_chat_request(&request) {
             Ok(request) => request,
             Err(err) => return futures::future::ready(Err(err)).boxed(),
         };
@@ -432,20 +500,20 @@ pub fn map_to_language_model_completion_events(
 impl CopilotChatLanguageModel {
     pub fn to_copilot_chat_request(
         &self,
-        request: LanguageModelRequest,
+        request: &LanguageModelRequest,
     ) -> Result<CopilotChatRequest> {
         let model = self.model.clone();
 
         let mut request_messages: Vec<LanguageModelRequestMessage> = Vec::new();
-        for message in request.messages {
+        for message in &request.messages {
             if let Some(last_message) = request_messages.last_mut() {
                 if last_message.role == message.role {
-                    last_message.content.extend(message.content);
+                    last_message.content.extend(message.content.clone());
                 } else {
-                    request_messages.push(message);
+                    request_messages.push(message.clone());
                 }
             } else {
-                request_messages.push(message);
+                request_messages.push(message.clone());
             }
         }
 
@@ -522,28 +590,25 @@ impl CopilotChatLanguageModel {
             }
         }
 
-        let tools = request
-            .tools
-            .iter()
-            .map(|tool| Tool::Function {
-                function: copilot::copilot_chat::Function {
-                    name: tool.name.clone(),
-                    description: tool.description.clone(),
-                    parameters: tool.input_schema.clone(),
-                },
-            })
-            .collect();
-
-        Ok(CopilotChatRequest {
+        let request = CopilotChatRequest {
             intent: true,
             n: 1,
             stream: model.uses_streaming(),
             temperature: 0.1,
             model,
             messages,
-            tools,
-            tool_choice: None,
-        })
+            tools: self.convert_tools(request),
+            tool_choice: self.get_tool_choice(),
+        };
+
+        // Debug logging for request payload
+        if let Ok(json) = serde_json::to_string_pretty(&request) {
+            log::error!("Final request payload to Copilot: {}", json);
+        } else {
+            log::error!("Failed to serialize request for logging");
+        }
+
+        Ok(request)
     }
 }
 
@@ -567,6 +632,15 @@ impl ConfigurationView {
                 })
             }),
         }
+    }
+}
+// Helper to ensure we always return a valid schema
+fn ensure_valid_schema(schema: serde_json::Value) -> serde_json::Value {
+    if schema.is_object() {
+        schema
+    } else {
+        log::error!("Invalid schema format, using empty schema");
+        serde_json::json!({})
     }
 }
 
