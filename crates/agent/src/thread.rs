@@ -1721,10 +1721,11 @@ impl Thread {
         });
     }
 
+    /// Insert an empty message to be populated with tool results upon send.
     pub fn attach_tool_results(&mut self, cx: &mut Context<Self>) {
-        if self.has_pending_tool_uses() || self.message_has_tool_results(self.next_message_id) {
-            self.insert_message(Role::User, vec![], cx);
-        }
+        // Tool results are assumed to be waiting on the next message id, so they will populate
+        // this empty message before sending to model. Would prefer this to be more straightforward.
+        self.insert_message(Role::User, vec![], cx);
         self.auto_capture_telemetry(cx);
     }
 
