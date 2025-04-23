@@ -13,21 +13,8 @@ use worktree::Snapshot;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PathSearchToolInput {
-    /// The glob to match against every path in the project.
-    ///
-    /// <example>
-    /// If the project has the following root directories:
-    ///
-    /// - directory1/a/something.txt
-    /// - directory2/a/things.txt
-    /// - directory3/a/other.txt
-    ///
-    /// You can get back the first two paths by providing a glob of "*thing*.txt"
-    /// </example>
     pub glob: String,
 
-    /// Optional starting position for paginated results (0-based).
-    /// When not provided, starts from the beginning.
     #[serde(default)]
     pub offset: u32,
 }
@@ -108,7 +95,6 @@ impl Tool for PathSearchTool {
 
 fn search_paths(glob: &str, project: Entity<Project>, cx: &mut App) -> Task<Result<Vec<PathBuf>>> {
     let path_matcher = match PathMatcher::new([
-        // Sometimes models try to search for "". In this case, return all paths in the project.
         if glob.is_empty() { "*" } else { glob },
     ]) {
         Ok(matcher) => matcher,

@@ -12,134 +12,14 @@ use ui::IconName;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ToolInvocation {
-    /// The name of the tool to invoke
     pub name: String,
-
-    /// The input to the tool in JSON format
     pub input: serde_json::Value,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BatchToolInput {
-    /// The tool invocations to run as a batch. These tools will be run either sequentially
-    /// or concurrently depending on the `run_tools_concurrently` flag.
-    ///
-    /// <example>
-    /// Basic file operations (concurrent)
-    ///
-    /// ```json
-    /// {
-    ///   "invocations": [
-    ///     {
-    ///       "name": "read_file",
-    ///       "input": {
-    ///         "path": "src/main.rs"
-    ///       }
-    ///     },
-    ///     {
-    ///       "name": "list_directory",
-    ///       "input": {
-    ///         "path": "src/lib"
-    ///       }
-    ///     },
-    ///     {
-    ///       "name": "grep",
-    ///       "input": {
-    ///         "regex": "fn run\\("
-    ///       }
-    ///     }
-    ///   ],
-    ///   "run_tools_concurrently": true
-    /// }
-    /// ```
-    /// </example>
-    ///
-    /// <example>
-    /// Multiple find-replace operations on the same file (sequential)
-    ///
-    /// ```json
-    /// {
-    ///   "invocations": [
-    ///     {
-    ///       "name": "find_replace_file",
-    ///       "input": {
-    ///         "path": "src/config.rs",
-    ///         "display_description": "Update default timeout value",
-    ///         "find": "pub const DEFAULT_TIMEOUT: u64 = 30;\n\npub const MAX_RETRIES: u32 = 3;\n\npub const SERVER_URL: &str = \"https://api.example.com\";",
-    ///         "replace": "pub const DEFAULT_TIMEOUT: u64 = 60;\n\npub const MAX_RETRIES: u32 = 3;\n\npub const SERVER_URL: &str = \"https://api.example.com\";"
-    ///       }
-    ///     },
-    ///     {
-    ///       "name": "find_replace_file",
-    ///       "input": {
-    ///         "path": "src/config.rs",
-    ///         "display_description": "Update API endpoint URL",
-    ///         "find": "pub const MAX_RETRIES: u32 = 3;\n\npub const SERVER_URL: &str = \"https://api.example.com\";\n\npub const API_VERSION: &str = \"v1\";",
-    ///         "replace": "pub const MAX_RETRIES: u32 = 3;\n\npub const SERVER_URL: &str = \"https://api.newdomain.com\";\n\npub const API_VERSION: &str = \"v1\";"
-    ///       }
-    ///     }
-    ///   ],
-    ///   "run_tools_concurrently": false
-    /// }
-    /// ```
-    /// </example>
-    ///
-    /// <example>
-    /// Searching and analyzing code (concurrent)
-    ///
-    /// ```json
-    /// {
-    ///   "invocations": [
-    ///     {
-    ///       "name": "grep",
-    ///       "input": {
-    ///         "regex": "impl Database"
-    ///       }
-    ///     },
-    ///     {
-    ///       "name": "path_search",
-    ///       "input": {
-    ///         "glob": "**/*test*.rs"
-    ///       }
-    ///     }
-    ///   ],
-    ///   "run_tools_concurrently": true
-    /// }
-    /// ```
-    /// </example>
-    ///
-    /// <example>
-    /// Multi-file refactoring (concurrent)
-    ///
-    /// ```json
-    /// {
-    ///   "invocations": [
-    ///     {
-    ///       "name": "find_replace_file",
-    ///       "input": {
-    ///         "path": "src/models/user.rs",
-    ///         "display_description": "Add email field to User struct",
-    ///         "find": "pub struct User {\n    pub id: u64,\n    pub username: String,\n    pub created_at: DateTime<Utc>,\n}",
-    ///         "replace": "pub struct User {\n    pub id: u64,\n    pub username: String,\n    pub email: String,\n    pub created_at: DateTime<Utc>,\n}"
-    ///       }
-    ///     },
-    ///     {
-    ///       "name": "find_replace_file",
-    ///       "input": {
-    ///         "path": "src/db/queries.rs",
-    ///         "display_description": "Update user insertion query",
-    ///         "find": "pub async fn insert_user(conn: &mut Connection, user: &User) -> Result<(), DbError> {\n    conn.execute(\n        \"INSERT INTO users (id, username, created_at) VALUES ($1, $2, $3)\",\n        &[&user.id, &user.username, &user.created_at],\n    ).await?;\n    \n    Ok(())\n}",
-    ///         "replace": "pub async fn insert_user(conn: &mut Connection, user: &User) -> Result<(), DbError> {\n    conn.execute(\n        \"INSERT INTO users (id, username, email, created_at) VALUES ($1, $2, $3, $4)\",\n        &[&user.id, &user.username, &user.email, &user.created_at],\n    ).await?;\n    \n    Ok(())\n}"
-    ///       }
-    ///     }
-    ///   ],
-    ///   "run_tools_concurrently": true
-    /// }
-    /// ```
-    /// </example>
     pub invocations: Vec<ToolInvocation>,
 
-    /// Whether to run the tools in this batch concurrently. If this is false (the default), the tools will run sequentially.
     #[serde(default)]
     pub run_tools_concurrently: bool,
 }

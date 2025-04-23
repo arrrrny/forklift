@@ -2,7 +2,6 @@ use gpui::{Animation, AnimationExt, App, IntoElement, pulsating_between};
 use std::time::Duration;
 use ui::{Tooltip, prelude::*};
 
-/// A reusable header component for tool call cards.
 #[derive(IntoElement)]
 pub struct ToolCallCardHeader {
     icon: IconName,

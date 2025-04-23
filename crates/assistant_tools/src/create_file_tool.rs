@@ -13,23 +13,7 @@ use util::markdown::MarkdownString;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CreateFileToolInput {
-    /// The path where the file should be created.
-    ///
-    /// <example>
-    /// If the project has the following structure:
-    ///
-    /// - directory1/
-    /// - directory2/
-    ///
-    /// You can create a new file by providing a path of "directory1/new_file.txt"
-    /// </example>
     pub path: String,
-
-    /// The text contents of the file to create.
-    ///
-    /// <example>
-    /// To create a file with the text "Hello, World!", provide contents of "Hello, World!"
-    /// </example>
     pub contents: String,
 }
 

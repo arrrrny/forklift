@@ -13,46 +13,14 @@ use std::{fmt::Write, path::Path};
 use ui::IconName;
 use util::markdown::MarkdownString;
 
-/// If the model requests to read a file whose size exceeds this, then
-/// the tool will return the file's symbol outline instead of its contents,
-/// and suggest trying again using line ranges from the outline.
 const MAX_FILE_SIZE_TO_READ: usize = 16384;
 
-/// If the model requests to list the entries in a directory with more
-/// entries than this, then the tool will return a subset of the entries
-/// and suggest trying again.
 const MAX_DIR_ENTRIES: usize = 1024;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ContentsToolInput {
-    /// The relative path of the file or directory to access.
-    ///
-    /// This path should never be absolute, and the first component
-    /// of the path should always be a root directory in a project.
-    ///
-    /// <example>
-    /// If the project has the following root directories:
-    ///
-    /// - directory1
-    /// - directory2
-    ///
-    /// If you want to access `file.txt` in `directory1`, you should use the path `directory1/file.txt`.
-    /// If you want to list contents in the directory `directory2/subfolder`, you should use the path `directory2/subfolder`.
-    /// </example>
     pub path: String,
-
-    /// Optional position (1-based index) to start reading on, if you want to read a subset of the contents.
-    /// When reading a file, this refers to a line number in the file (e.g. 1 is the first line).
-    /// When reading a directory, this refers to the number of the directory entry (e.g. 1 is the first entry).
-    ///
-    /// Defaults to 1.
     pub start: Option<u32>,
-
-    /// Optional position (1-based index) to end reading on, if you want to read a subset of the contents.
-    /// When reading a file, this refers to a line number in the file (e.g. 1 is the first line).
-    /// When reading a directory, this refers to the number of the directory entry (e.g. 1 is the first entry).
-    ///
-    /// Defaults to reading until the end of the file or directory.
     pub end: Option<u32>,
 }
 

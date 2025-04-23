@@ -267,11 +267,6 @@ impl Tool for CodeActionTool {
     }
 }
 
-/// Finds the range of the text in the buffer, if it appears between context_before_range
-/// and context_after_range, and if that combined string has one unique result in the buffer.
-///
-/// If an exact match fails, it tries adding a newline to the end of context_before_range and
-/// to the beginning of context_after_range to accommodate line-based context matching.
 fn find_text_range(
     buffer: &Buffer,
     context_before_range: &str,
@@ -281,13 +276,11 @@ fn find_text_range(
     let snapshot = buffer.snapshot();
     let text = snapshot.text();
 
-    // First try with exact match
     let search_string = format!("{context_before_range}{text_range}{context_after_range}");
     let mut positions = text.match_indices(&search_string);
     let position_result = positions.next();
 
     if let Some(position) = position_result {
-        // Check if the matched string is unique
         if positions.next().is_none() {
             let range_start = position.0 + context_before_range.len();
             let range_end = range_start + text_range.len();
@@ -298,8 +291,6 @@ fn find_text_range(
         }
     }
 
-    // If exact match fails or is not unique, try with line-based context
-    // Add a newline to the end of before context and beginning of after context
     let line_based_before = if context_before_range.ends_with('\n') {
         context_before_range.to_string()
     } else {
@@ -316,7 +307,6 @@ fn find_text_range(
     let mut line_positions = text.match_indices(&line_search_string);
     let line_position = line_positions.next()?;
 
-    // The line-based search string must also appear exactly once
     if line_positions.next().is_some() {
         return None;
     }

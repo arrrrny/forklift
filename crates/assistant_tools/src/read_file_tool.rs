@@ -12,34 +12,15 @@ use std::sync::Arc;
 use ui::IconName;
 use util::markdown::MarkdownString;
 
-/// If the model requests to read a file whose size exceeds this, then
-/// the tool will return an error along with the model's symbol outline,
-/// and suggest trying again using line ranges from the outline.
 const MAX_FILE_SIZE_TO_READ: usize = 16384;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ReadFileToolInput {
-    /// The relative path of the file to read.
-    ///
-    /// This path should never be absolute, and the first component
-    /// of the path should always be a root directory in a project.
-    ///
-    /// <example>
-    /// If the project has the following root directories:
-    ///
-    /// - directory1
-    /// - directory2
-    ///
-    /// If you want to access `file.txt` in `directory1`, you should use the path `directory1/file.txt`.
-    /// If you want to access `file.txt` in `directory2`, you should use the path `directory2/file.txt`.
-    /// </example>
     pub path: String,
 
-    /// Optional line number to start reading on (1-based index)
     #[serde(default)]
     pub start_line: Option<usize>,
 
-    /// Optional line number to end reading on (1-based index)
     #[serde(default)]
     pub end_line: Option<usize>,
 }

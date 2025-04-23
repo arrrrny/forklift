@@ -254,8 +254,6 @@ impl LanguageModel for CopilotChatLanguageModel {
         match self.model {
             CopilotChatModel::Gpt4_1
             | CopilotChatModel::O4Mini
-            | CopilotChatModel::Gpt4o
-            | CopilotChatModel::O3Mini
             | CopilotChatModel::Claude3_5Sonnet
             | CopilotChatModel::Claude3_7Sonnet
             | CopilotChatModel::Claude3_7SonnetThinking => true,
