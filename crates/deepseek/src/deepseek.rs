@@ -296,10 +296,26 @@ pub async fn stream_completion(
     } else {
         let mut body = String::new();
         response.body_mut().read_to_string(&mut body).await?;
-        Err(anyhow!(
-            "Failed to connect to DeepSeek API: {} {}",
-            response.status(),
-            body,
-        ))
+
+        #[derive(Deserialize)]
+        struct DeepSeekResponseError {
+            error: DeepSeekError,
+        }
+        #[derive(Deserialize)]
+        struct DeepSeekError {
+            message: String,
+        }
+
+        match serde_json::from_str::<DeepSeekResponseError>(&body) {
+            Ok(response) if !response.error.message.is_empty() => Err(anyhow!(
+                "Failed to connect to DeepSeek API: {}",
+                response.error.message,
+            )),
+            _ => Err(anyhow!(
+                "Failed to connect to DeepSeek API: {} {}",
+                response.status(),
+                body,
+            )),
+        }
     }
 }

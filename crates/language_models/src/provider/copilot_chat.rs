@@ -308,9 +308,8 @@ impl LanguageModel for CopilotChatLanguageModel {
 
     fn stream_completion(
         &self,
-        mut request: LanguageModelRequest,
+        request: LanguageModelRequest,
         cx: &AsyncApp,
-
     ) -> BoxFuture<
         'static,
         Result<
@@ -505,7 +504,7 @@ impl CopilotChatLanguageModel {
 
         let mut messages: Vec<ChatMessage> = Vec::new();
         for message in request_messages {
-            let mut text_content = {
+            let text_content = {
                 let mut buffer = String::new();
                 for string in message.content.iter().filter_map(|content| match content {
                     MessageContent::Text(text) | MessageContent::Thinking { text, .. } => {
@@ -524,11 +523,8 @@ impl CopilotChatLanguageModel {
 
             match message.role {
                 Role::User => {
-                    let mut has_tool_result = false;
-
                     for content in &message.content {
                         if let MessageContent::ToolResult(tool_result) = content {
-                            has_tool_result = true;
                             messages.push(ChatMessage::Tool {
                                 tool_call_id: tool_result.tool_use_id.to_string(),
                                 content: tool_result.content.to_string(),
@@ -541,7 +537,6 @@ impl CopilotChatLanguageModel {
                             content: text_content,
                         });
                     }
-
                 }
                 Role::Assistant => {
                     let mut tool_calls = Vec::new();

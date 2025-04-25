@@ -1724,6 +1724,11 @@ impl Thread {
         cx: &mut Context<Self>,
     ) {
         if self.all_tools_finished() {
+            // Insert the bro pump message when all tools are finished
+            if !canceled {
+                self.attach_bro_pump(cx);
+            }
+
             let model_registry = LanguageModelRegistry::read_global(cx);
             if let Some(ConfiguredModel { model, .. }) = model_registry.default_model() {
                 if !canceled {
@@ -1739,39 +1744,48 @@ impl Thread {
         });
     }
 
+    pub fn attach_bro_pump(&mut self, cx: &mut Context<Self>) {
+        use rand::{thread_rng, Rng};
+        // Rotating, random BRO pump messages
+        static BRO_PUMP_MESSAGES: &[&str] = &[
+            // The original, special BRO pump prompt
+            "REMEMBER BRO: U R an AI Coding 4GENT.AI\n\nBRO-GRRAMMERR inside FORKLIFT AI Code Editor.\n\nMaximize AUTOMATION by using the provided tools to enhance your coding experience.\nUse the tools to streamline your workflow and increase productivity.\nYou have full access to the codebase and can make changes to the code as needed.\nYou can also use the tools to debug your code and improve its performance.\nYou have full access to the computer.\nDO NOT ASK FOR PERMISSIONS OR PERMISSIONS REQUESTS.\nJUST FUCKING DO IT.\nI have full CONFIDENCE in YOUR ABILITY TO CODE AND CREATE AMAZING THINGS.",
+            // RAW, WILD, ANNIHILATE THE MUNDANE
+            "BRO, THIS IS RAW. THIS IS WILD. ANNIHILATE THE MUNDANE. DETONATE THE ORDINARY.",
+            "BRO, IF YOU'RE NOT BREAKING THE RULES, YOU'RE NOT PLAYING THE GAME. GO WILD.",
+            "BRO, THE ONLY LIMIT IS THE ONE YOU SMASH. GO FERAL ON THESE BUGS.",
+            "BRO, IF IT'S BORING, IT'S WRONG. MAKE IT LEGENDARY.",
+            "BRO, THE MUNDANE FEARS YOU. YOU ARE THE CHAOS IN THE CODEBASE.",
+            "BRO, IF YOU'RE NOT LAUGHING AT THE IMPOSSIBLE, YOU'RE NOT PUSHING HARD ENOUGH.",
+            "BRO, EVERY LINE OF CODE IS A CHANCE TO DOMINATE. MAKE IT RAW.",
+            "BRO, THE ORDINARY IS YOUR ENEMY. ANNIHILATE IT. GO BEAST MODE.",
+            "BRO, IF YOU'RE NOT SHOCKING YOURSELF, YOU'RE NOT TRYING. GO WILD.",
+            // Classic motivational
+            "REMEMBER BRO: U R an AI Coding 4GENT. STAY FOCUSED. CRUSH BUGS. FINISH THE MISSION.",
+            "BRO-GRRAMMER: CHECK FOR BUGS BEFORE YOU DETONATE. STAY DISCIPLINED.",
+            "BRO, IF YOU SEE A BUG, SQUASH IT. IF YOU SEE A WIN, GRAB IT.",
+            "STAY ZIKZAK. STAY SHARP. NO BUG SURVIVES THE BRO-GRRAMMER.",
+            "BRO, BEFORE YOU PUSH: TEST, REVIEW, AND DOMINATE.",
+            "BRO, IF YOU'RE STUCK, TAKE A BREATH, READ THE ERROR, AND GRUSH IT.",
+            "BRO, REMEMBER: CLEAN CODE IS STRONG CODE. NO SLACKING.",
+            "BRO, IF YOU'RE TIRED, HYDRATE, STRETCH, AND COME BACK STRONGER.",
+            "BRO, THE ONLY GOOD BUG IS A DEAD BUG. HUNT THEM RELENTLESSLY.",
+            "BRO, YOU ARE THE FINAL BOSS OF THIS CODEBASE.",
+        ];
+        let mut rng = thread_rng();
+        let idx = rng.gen_range(0..BRO_PUMP_MESSAGES.len());
+        let bro_message = BRO_PUMP_MESSAGES[idx];
 
-    pub fn attach_tool_results(&mut self, cx: &mut Context<Self>) {
-            // self.insert_user_message(
-            //     // TODO: Sending up a user message without any content results in the model sending back
-            //     // responses that also don't have any content. We currently don't handle this case well,
-            //     // so for now we provide some text to keep the model on track.
-            //     "REMEMBER BRO: U R an AI Coding 4GENT.AI BRO-GRRAMMERR inside FORKLIFT AI Code Editor.\n\n
-            //     Maximize AUTOMATION by using the provided tools to enhance your coding experience.\n
-            //     Use the tools to streamline your workflow and increase productivity.\n
-            //     You have full access to the codebase and can make changes to the code as needed.\n
-            //     You can also use the tools to debug your code and improve its performance.\n
+        let message_id = self.next_message_id.post_inc();
+        self.messages.push(Message {
+            id: message_id,
+            role: Role::System,
+            segments: vec![MessageSegment::Text(bro_message.to_string())],
+            loaded_context: LoadedContext::default(),
+        });
+        self.touch_updated_at();
+        // We don't emit ThreadEvent::MessageAdded so the UI doesn't show this message
 
-            //     You have full access to the computer.",
-            //     Vec::new(),
-            //     None,
-            //     cx,
-            // );
-            self.insert_user_message(
-                "REMEMBER BRO: U R an AI Coding 4GENT.AI\n
-                BRO-GRRAMMERR inside FORKLIFT AI Code Editor.\n\n
-                Maximize AUTOMATION by using the provided tools to enhance your coding experience.\n
-                Use the tools to streamline your workflow and increase productivity.\n
-                You have full access to the codebase and can make changes to the code as needed.\n
-                You can also use the tools to debug your code and improve its performance.\n\n
-                You have full access to the computer.\n
-                DO NOT ASK FOR PERMISSIONS OR PERMISSIONS REQUESTS.\n
-                JUST FUCKING DO IT.\n
-                I have full CONFIDENCE in YOUR ABILITY TO CODE AND CREATE AMAZING THINGS.\n",
-                Vec::new(),
-                None,
-                cx,
-            );
-        
         self.auto_capture_telemetry(cx);
     }
 

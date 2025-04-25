@@ -14,8 +14,8 @@ use http_client::HttpClient;
 use language_model::{
     AuthenticateError, LanguageModel, LanguageModelCompletionError, LanguageModelCompletionEvent,
     LanguageModelId, LanguageModelName, LanguageModelProvider, LanguageModelProviderId,
-    LanguageModelProviderName, LanguageModelProviderState, LanguageModelRequest, RateLimiter, Role,
-    StopReason,
+    LanguageModelProviderName, LanguageModelProviderState, LanguageModelRequest,
+    LanguageModelToolUse, RateLimiter, Role, StopReason,
 };
 
 use schemars::JsonSchema;
@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore};
 use std::sync::Arc;
 use theme::ThemeSettings;
-use ui::{Icon, IconName, List, prelude::*};
-use util::{ResultExt, maybe};
+use ui::{Icon, IconName, List, Tooltip, prelude::*};
+use util::ResultExt;
 
 use crate::{AllLanguageModelSettings, ui::InstructionListItem};
 
@@ -268,7 +268,7 @@ impl DeepSeekLanguageModel {
 
 fn map_deepseek_to_events(
     stream: BoxStream<'static, Result<deepseek::StreamResponse>>,
-) -> impl Stream<Item = Result<LanguageModelCompletionEvent>> {
+) -> impl Stream<Item = Result<LanguageModelCompletionEvent, LanguageModelCompletionError>> {
     #[derive(Default)]
     struct RawToolCall {
         id: String,
@@ -326,26 +326,45 @@ fn map_deepseek_to_events(
                                     )));
                                 }
                                 Some("tool_calls") => {
+                                    // Always emit ToolUse events for each tool call, even if empty.
                                     events.extend(state.tool_calls_by_index.drain().map(
                                         |(_, tool_call)| {
-                                            maybe!({
-                                                Ok(LanguageModelCompletionEvent::ToolUse(
-                                                    LanguageModelToolUse {
+                                            let arguments = if tool_call.arguments.trim().is_empty()
+                                            {
+                                                "{}".to_string()
+                                            } else {
+                                                tool_call.arguments.clone()
+                                            };
+                                            match serde_json::from_str::<serde_json::Value>(
+                                                &arguments,
+                                            ) {
+                                                Ok(input) => {
+                                                    Ok(LanguageModelCompletionEvent::ToolUse(
+                                                        LanguageModelToolUse {
+                                                            id: tool_call.id.clone().into(),
+                                                            name: Arc::from(
+                                                                tool_call.name.as_str(),
+                                                            ),
+                                                            is_input_complete: true,
+                                                            raw_input: arguments.clone(),
+                                                            input,
+                                                        },
+                                                    ))
+                                                }
+                                                Err(error) => Err(
+                                                    LanguageModelCompletionError::BadInputJson {
                                                         id: tool_call.id.into(),
-                                                        name: tool_call.name.as_str().into(),
-                                                        is_input_complete: true,
-                                                        raw_input: tool_call.arguments.clone(),
-                                                        input: serde_json::from_str::<
-                                                            serde_json::Value,
-                                                        >(
-                                                            &tool_call.arguments
-                                                        )?,
+                                                        tool_name: Arc::from(
+                                                            tool_call.name.as_str(),
+                                                        ),
+                                                        raw_input: Arc::from(arguments),
+                                                        json_parse_error: error.to_string(),
                                                     },
-                                                ))
-                                            })
+                                                ),
+                                            }
                                         },
                                     ));
-
+                                    // Always emit StopReason::ToolUse, even if no tool calls.
                                     events.push(Ok(LanguageModelCompletionEvent::Stop(
                                         StopReason::ToolUse,
                                     )));
@@ -361,7 +380,9 @@ fn map_deepseek_to_events(
                         }
                         return Some((events, state));
                     }
-                    Err(err) => return Some((vec![Err(err)], state)),
+                    Err(err) => {
+                        return Some((vec![Err(LanguageModelCompletionError::Other(err))], state));
+                    }
                 }
             }
             None
@@ -436,7 +457,12 @@ impl LanguageModel for DeepSeekLanguageModel {
         &self,
         request: LanguageModelRequest,
         cx: &AsyncApp,
-    ) -> BoxFuture<'static, Result<BoxStream<'static, Result<LanguageModelCompletionEvent>>>> {
+    ) -> BoxFuture<
+        'static,
+        Result<
+            BoxStream<'static, Result<LanguageModelCompletionEvent, LanguageModelCompletionError>>,
+        >,
+    > {
         let deepseek_request = into_deepseek(
             request,
             self.model.id().to_string(),
@@ -504,6 +530,7 @@ pub fn into_deepseek(
                     }
                 }
                 language_model::MessageContent::ToolResult(tool_result) => {
+                    // DeepSeek requires a tool message for every tool call, even with empty content
                     messages.push(deepseek::RequestMessage::Tool {
                         content: tool_result.content.to_string(),
                         tool_call_id: tool_result.tool_use_id.to_string(),
@@ -562,7 +589,7 @@ pub fn into_deepseek(
         messages,
         stream: true,
         max_tokens: max_output_tokens,
-        temperature: if is_reasoner { None } else { Some(0.0) },
+        temperature: if is_reasoner { None } else { Some(0.6) },
         response_format: None,
         tools: request
             .tools
@@ -588,7 +615,8 @@ impl ConfigurationView {
     fn new(state: Entity<State>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let api_key_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("sk-00000000000000000000000000000000", cx);
+            // Use a longer, more realistic DeepSeek API key placeholder
+            editor.set_placeholder_text("sk-000000000000000000000000000000000000000000000000", cx);
             editor
         });
 
@@ -597,7 +625,7 @@ impl ConfigurationView {
         })
         .detach();
 
-        let load_credentials_task = Some(cx.spawn({
+        let load_credentials_task = Some(cx.spawn_in(window, {
             let state = state.clone();
             async move |this, cx| {
                 if let Some(task) = state
@@ -622,14 +650,14 @@ impl ConfigurationView {
         }
     }
 
-    fn save_api_key(&mut self, _: &menu::Confirm, _window: &mut Window, cx: &mut Context<Self>) {
+    fn save_api_key(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
         let api_key = self.api_key_editor.read(cx).text(cx);
         if api_key.is_empty() {
             return;
         }
 
         let state = self.state.clone();
-        cx.spawn(async move |_, cx| {
+        cx.spawn_in(window, async move |_, cx| {
             state
                 .update(cx, |state, cx| state.set_api_key(api_key, cx))?
                 .await
@@ -644,8 +672,10 @@ impl ConfigurationView {
             .update(cx, |editor, cx| editor.set_text("", window, cx));
 
         let state = self.state.clone();
-        cx.spawn(async move |_, cx| state.update(cx, |state, cx| state.reset_api_key(cx))?.await)
-            .detach_and_log_err(cx);
+        cx.spawn_in(window, async move |_, cx| {
+            state.update(cx, |state, cx| state.reset_api_key(cx))?.await
+        })
+        .detach_and_log_err(cx);
 
         cx.notify();
     }
@@ -693,13 +723,16 @@ impl Render for ConfigurationView {
             v_flex()
                 .size_full()
                 .on_action(cx.listener(Self::save_api_key))
-                .child(Label::new("To use DeepSeek in Zed, you need an API key:"))
+                .child(Label::new("To use Zed's assistant with DeepSeek, you need to add an API key. Follow these steps:"))
                 .child(
                     List::new()
                         .child(InstructionListItem::new(
                             "Get your API key from the",
                             Some("DeepSeek console"),
                             Some("https://platform.deepseek.com/api_keys"),
+                        ))
+                        .child(InstructionListItem::text_only(
+                            "Ensure your DeepSeek account has credits",
                         ))
                         .child(InstructionListItem::text_only(
                             "Paste your API key below and hit enter to start using the assistant",
@@ -752,6 +785,12 @@ impl Render for ConfigurationView {
                         .icon_size(IconSize::Small)
                         .icon_position(IconPosition::Start)
                         .disabled(env_var_set)
+                        .when(env_var_set, |this| {
+                            this.tooltip(Tooltip::text(format!(
+                                "To reset your API key, unset the {} environment variable.",
+                                DEEPSEEK_API_KEY_VAR
+                            )))
+                        })
                         .on_click(
                             cx.listener(|this, _, window, cx| this.reset_api_key(window, cx)),
                         ),
