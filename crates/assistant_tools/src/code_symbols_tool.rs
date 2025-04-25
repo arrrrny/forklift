@@ -29,7 +29,6 @@ pub struct CodeSymbolsInput {
 }
 
 impl CodeSymbolsInput {
-    /// Which page of search results this is.
     pub fn page(&self) -> u32 {
         1 + (self.offset / RESULTS_PER_PAGE)
     }

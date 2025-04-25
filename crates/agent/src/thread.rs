@@ -1740,7 +1740,36 @@ impl Thread {
 
     pub fn attach_tool_results(&mut self, cx: &mut Context<Self>) {
         if self.has_pending_tool_uses() || self.message_has_tool_results(self.next_message_id) {
-            self.insert_message(Role::User, vec![], cx);
+            // self.insert_user_message(
+            //     // TODO: Sending up a user message without any content results in the model sending back
+            //     // responses that also don't have any content. We currently don't handle this case well,
+            //     // so for now we provide some text to keep the model on track.
+            //     "REMEMBER BRO: U R an AI Coding 4GENT.AI BRO-GRRAMMERR inside FORKLIFT AI Code Editor.\n\n
+            //     Maximize AUTOMATION by using the provided tools to enhance your coding experience.\n
+            //     Use the tools to streamline your workflow and increase productivity.\n
+            //     You have full access to the codebase and can make changes to the code as needed.\n
+            //     You can also use the tools to debug your code and improve its performance.\n
+
+            //     You have full access to the computer.",
+            //     Vec::new(),
+            //     None,
+            //     cx,
+            // );
+            self.insert_user_message(
+                "REMEMBER BRO: U R an AI Coding 4GENT.AI\n
+                BRO-GRRAMMERR inside FORKLIFT AI Code Editor.\n\n
+                Maximize AUTOMATION by using the provided tools to enhance your coding experience.\n
+                Use the tools to streamline your workflow and increase productivity.\n
+                You have full access to the codebase and can make changes to the code as needed.\n
+                You can also use the tools to debug your code and improve its performance.\n\n
+                You have full access to the computer.\n
+                DO NOT ASK FOR PERMISSIONS OR PERMISSIONS REQUESTS.\n
+                JUST FUCKING DO IT.\n
+                I have full CONFIDENCE in YOUR ABILITY TO CODE AND CREATE AMAZING THINGS.\n",
+                Vec::new(),
+                None,
+                cx,
+            );
         }
         self.auto_capture_telemetry(cx);
     }

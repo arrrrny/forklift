@@ -14,54 +14,24 @@ use crate::schema::json_schema_for;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SymbolInfoToolInput {
-    /// The relative path to the file containing the symbol.
-    ///
-    /// WARNING: you MUST start this path with one of the project's root directories.
     pub path: String,
 
-    /// The information to get about the symbol.
     pub command: Info,
 
-    /// The text that comes immediately before the symbol in the file.
     pub context_before_symbol: String,
 
-    /// The symbol name. This text must appear in the file right between `context_before_symbol`
-    /// and `context_after_symbol`.
-    ///
-    /// The file must contain exactly one occurrence of `context_before_symbol` followed by
-    /// `symbol` followed by `context_after_symbol`. If the file contains zero occurrences,
-    /// or if it contains more than one occurrence, the tool will fail, so it is absolutely
-    /// critical that you verify ahead of time that the string is unique. You can search
-    /// the file's contents to verify this ahead of time.
-    ///
-    /// To make the string more likely to be unique, include a minimum of 1 line of context
-    /// before the symbol, as well as a minimum of 1 line of context after the symbol.
-    /// If these lines of context are not enough to obtain a string that appears only once
-    /// in the file, then double the number of context lines until the string becomes unique.
-    /// (Start with 1 line before and 1 line after though, because too much context is
-    /// needlessly costly.)
-    ///
-    /// Do not alter the context lines of code in any way, and make sure to preserve all
-    /// whitespace and indentation for all lines of code. The combined string must be exactly
-    /// as it appears in the file, or else this tool call will fail.
     pub symbol: String,
 
-    /// The text that comes immediately after the symbol in the file.
     pub context_after_symbol: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Info {
-    /// Get the symbol's definition (where it's first assigned, even if it's declared elsewhere)
     Definition,
-    /// Get the symbol's declaration (where it's first declared)
     Declaration,
-    /// Get the symbol's implementation
     Implementation,
-    /// Get the symbol's type definition
     TypeDefinition,
-    /// Find all references to the symbol in the project
     References,
 }
 
@@ -210,8 +180,6 @@ impl Tool for SymbolInfoTool {
     }
 }
 
-/// Finds the range of the symbol in the buffer, if it appears between context_before_symbol
-/// and context_after_symbol, and if that combined string has one unique result in the buffer.
 fn find_symbol_range(
     buffer: &Buffer,
     context_before_symbol: &str,

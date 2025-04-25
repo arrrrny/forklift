@@ -14,15 +14,12 @@ use ui::IconName;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Timezone {
-    /// Use UTC for the datetime.
     Utc,
-    /// Use local time for the datetime.
     Local,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct NowToolInput {
-    /// The timezone to use for the datetime.
     timezone: Timezone,
 }
 

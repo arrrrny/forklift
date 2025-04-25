@@ -25,7 +25,6 @@ enum ContentType {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FetchToolInput {
-    /// The URL to fetch.
     url: String,
 }
 

@@ -268,11 +268,6 @@ impl Tool for CodeActionTool {
     }
 }
 
-/// Finds the range of the text in the buffer, if it appears between context_before_range
-/// and context_after_range, and if that combined string has one unique result in the buffer.
-///
-/// If an exact match fails, it tries adding a newline to the end of context_before_range and
-/// to the beginning of context_after_range to accommodate line-based context matching.
 fn find_text_range(
     buffer: &Buffer,
     context_before_range: &str,

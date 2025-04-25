@@ -12,8 +12,6 @@ use ui::IconName;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ThinkingToolInput {
-    /// Content to think about. This should be a description of what to think about or
-    /// a problem to solve.
     content: String,
 }
 
