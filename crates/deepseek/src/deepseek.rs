@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::convert::TryFrom;
 
-pub const DEEPSEEK_API_URL: &str = "https://api.deepseek.com";
+pub const DEEPSEEK_API_URL: &str = "https://api.deepseek.com/beta";
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]

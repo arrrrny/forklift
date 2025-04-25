@@ -3,9 +3,6 @@ use project::search::SearchQuery;
 use std::iter;
 use util::{ResultExt as _, paths::PathMatcher};
 
-/// Performs an exact string replacement in a buffer, requiring precise character-for-character matching.
-/// Uses the search functionality to locate the first occurrence of the exact string.
-/// Returns None if no exact match is found in the buffer.
 pub async fn replace_exact(old: &str, new: &str, snapshot: &BufferSnapshot) -> Option<Diff> {
     let query = SearchQuery::text(
         old,
@@ -46,9 +43,6 @@ pub async fn replace_exact(old: &str, new: &str, snapshot: &BufferSnapshot) -> O
     Some(diff)
 }
 
-/// Performs a replacement that's indentation-aware - matches text content ignoring leading whitespace differences.
-/// When replacing, preserves the indentation level found in the buffer at each matching line.
-/// Returns None if no match found or if indentation is offset inconsistently across matched lines.
 pub fn replace_with_flexible_indent(old: &str, new: &str, buffer: &BufferSnapshot) -> Option<Diff> {
     let (old_lines, old_min_indent) = lines_with_min_indent(old);
     let (new_lines, new_min_indent) = lines_with_min_indent(new);

@@ -13,19 +13,6 @@ use util::markdown::MarkdownString;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DiagnosticsToolInput {
-    /// The path to get diagnostics for. If not provided, returns a project-wide summary.
-    ///
-    /// This path should never be absolute, and the first component
-    /// of the path should always be a root directory in a project.
-    ///
-    /// <example>
-    /// If the project has the following root directories:
-    ///
-    /// - lorem
-    /// - ipsum
-    ///
-    /// If you wanna access diagnostics for `dolor.txt` in `ipsum`, you should use the path `ipsum/dolor.txt`.
-    /// </example>
     #[serde(deserialize_with = "deserialize_path")]
     pub path: Option<String>,
 }

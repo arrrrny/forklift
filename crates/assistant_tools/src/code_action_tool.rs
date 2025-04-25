@@ -14,67 +14,11 @@ use crate::schema::json_schema_for;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CodeActionToolInput {
-    /// The relative path to the file containing the text range.
-    ///
-    /// WARNING: you MUST start this path with one of the project's root directories.
     pub path: String,
-
-    /// The specific code action to execute.
-    ///
-    /// If this field is provided, the tool will execute the specified action.
-    /// If omitted, the tool will list all available code actions for the text range.
-    ///
-    /// Here are some actions that are commonly supported (but may not be for this particular
-    /// text range; you can omit this field to list all the actions, if you want to know
-    /// what your options are, or you can just try an action and if it fails I'll tell you
-    /// what the available actions were instead):
-    /// - "quickfix.all" - applies all available quick fixes in the range
-    /// - "source.organizeImports" - sorts and cleans up import statements
-    /// - "source.fixAll" - applies all available auto fixes
-    /// - "refactor.extract" - extracts selected code into a new function or variable
-    /// - "refactor.inline" - inlines a variable by replacing references with its value
-    /// - "refactor.rewrite" - general code rewriting operations
-    /// - "source.addMissingImports" - adds imports for references that lack them
-    /// - "source.removeUnusedImports" - removes imports that aren't being used
-    /// - "source.implementInterface" - generates methods required by an interface/trait
-    /// - "source.generateAccessors" - creates getter/setter methods
-    /// - "source.convertToAsyncFunction" - converts callback-style code to async/await
-    ///
-    /// Also, there is a special case: if you specify exactly "textDocument/rename" as the action,
-    /// then this will rename the symbol to whatever string you specified for the `arguments` field.
     pub action: Option<String>,
-
-    /// Optional arguments to pass to the code action.
-    ///
-    /// For rename operations (when action="textDocument/rename"), this should contain the new name.
-    /// For other code actions, these arguments may be passed to the language server.
     pub arguments: Option<serde_json::Value>,
-
-    /// The text that comes immediately before the text range in the file.
     pub context_before_range: String,
-
-    /// The text range. This text must appear in the file right between `context_before_range`
-    /// and `context_after_range`.
-    ///
-    /// The file must contain exactly one occurrence of `context_before_range` followed by
-    /// `text_range` followed by `context_after_range`. If the file contains zero occurrences,
-    /// or if it contains more than one occurrence, the tool will fail, so it is absolutely
-    /// critical that you verify ahead of time that the string is unique. You can search
-    /// the file's contents to verify this ahead of time.
-    ///
-    /// To make the string more likely to be unique, include a minimum of 1 line of context
-    /// before the text range, as well as a minimum of 1 line of context after the text range.
-    /// If these lines of context are not enough to obtain a string that appears only once
-    /// in the file, then double the number of context lines until the string becomes unique.
-    /// (Start with 1 line before and 1 line after though, because too much context is
-    /// needlessly costly.)
-    ///
-    /// Do not alter the context lines of code in any way, and make sure to preserve all
-    /// whitespace and indentation for all lines of code. The combined string must be exactly
-    /// as it appears in the file, or else this tool call will fail.
     pub text_range: String,
-
-    /// The text that comes immediately after the text range in the file.
     pub context_after_range: String,
 }
 
@@ -324,11 +268,6 @@ impl Tool for CodeActionTool {
     }
 }
 
-/// Finds the range of the text in the buffer, if it appears between context_before_range
-/// and context_after_range, and if that combined string has one unique result in the buffer.
-///
-/// If an exact match fails, it tries adding a newline to the end of context_before_range and
-/// to the beginning of context_after_range to accommodate line-based context matching.
 fn find_text_range(
     buffer: &Buffer,
     context_before_range: &str,

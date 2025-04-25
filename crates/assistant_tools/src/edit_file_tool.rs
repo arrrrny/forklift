@@ -26,40 +26,9 @@ use workspace::Workspace;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct EditFileToolInput {
-    /// A user-friendly markdown description of what's being replaced. This will be shown in the UI.
-    ///
-    /// <example>Fix API endpoint URLs</example>
-    /// <example>Update copyright year in `page_footer`</example>
-    ///
-    /// Make sure to include this field before all the others in the input object
-    /// so that we can display it immediately.
-    pub display_description: String,
-
-    /// The full path of the file to modify in the project.
-    ///
-    /// WARNING: When specifying which file path need changing, you MUST
-    /// start each path with one of the project's root directories.
-    ///
-    /// The following examples assume we have two root directories in the project:
-    /// - backend
-    /// - frontend
-    ///
-    /// <example>
-    /// `backend/src/main.rs`
-    ///
-    /// Notice how the file path starts with root-1. Without that, the path
-    /// would be ambiguous and the call would fail!
-    /// </example>
-    ///
-    /// <example>
-    /// `frontend/db.js`
-    /// </example>
-    pub path: PathBuf,
-
-    /// The text to replace.
     pub old_string: String,
-
-    /// The text to replace it with.
+    pub path: PathBuf,
+    pub display_description: String,
     pub new_string: String,
 }
 

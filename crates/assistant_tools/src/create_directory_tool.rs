@@ -14,16 +14,6 @@ use util::markdown::MarkdownString;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CreateDirectoryToolInput {
-    /// The path of the new directory.
-    ///
-    /// <example>
-    /// If the project has the following structure:
-    ///
-    /// - directory1/
-    /// - directory2/
-    ///
-    /// You can create a new directory by providing a path of "directory1/new_directory"
-    /// </example>
     pub path: String,
 }
 
