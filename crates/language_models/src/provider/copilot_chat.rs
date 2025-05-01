@@ -1,4 +1,5 @@
 use copilot::copilot_chat::ToolChoice;
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -362,6 +363,8 @@ pub fn map_to_language_model_completion_events(
     events: Pin<Box<dyn Send + Stream<Item = Result<ResponseEvent>>>>,
     is_streaming: bool,
 ) -> impl Stream<Item = Result<LanguageModelCompletionEvent, LanguageModelCompletionError>> {
+    use std::collections::BTreeMap;
+
     #[derive(Default)]
     struct RawToolCall {
         id: String,
@@ -371,13 +374,17 @@ pub fn map_to_language_model_completion_events(
 
     struct State {
         events: Pin<Box<dyn Send + Stream<Item = Result<ResponseEvent>>>>,
-        tool_calls_by_index: HashMap<usize, RawToolCall>,
+        tool_calls_by_index: std::collections::HashMap<usize, RawToolCall>,
+        tool_call_id_to_index: BTreeMap<String, usize>,
+        next_tool_call_index: usize,
     }
 
     futures::stream::unfold(
         State {
             events,
-            tool_calls_by_index: HashMap::default(),
+            tool_calls_by_index: std::collections::HashMap::default(),
+            tool_call_id_to_index: BTreeMap::new(),
+            next_tool_call_index: 0,
         },
         move |mut state| async move {
             if let Some(event) = state.events.next().await {
@@ -409,10 +416,31 @@ pub fn map_to_language_model_completion_events(
                         }
 
                         for tool_call in &delta.tool_calls {
-                            let entry = state
-                                .tool_calls_by_index
-                                .entry(tool_call.index)
-                                .or_default();
+                            // Determine the index to use for grouping tool calls
+                            let index_to_use = if let Some(idx) = tool_call.index {
+                                // If index is present, use it. If ID is also present, store the mapping.
+                                if let Some(id) = tool_call.id.clone() {
+                                    state.tool_call_id_to_index.entry(id.clone()).or_insert(idx);
+                                }
+                                idx
+                            } else if let Some(id) = tool_call.id.clone() {
+                                // If index is missing, try to find or assign it using the ID
+                                *state
+                                    .tool_call_id_to_index
+                                    .entry(id.clone())
+                                    .or_insert_with(|| {
+                                        let new_index = state.next_tool_call_index;
+                                        state.next_tool_call_index += 1;
+                                        new_index
+                                    })
+                            } else {
+                                // If both index and ID are missing, assign a new index
+                                let new_index = state.next_tool_call_index;
+                                state.next_tool_call_index += 1;
+                                new_index
+                            };
+
+                            let entry = state.tool_calls_by_index.entry(index_to_use).or_default();
 
                             if let Some(tool_id) = tool_call.id.clone() {
                                 entry.id = tool_id;
@@ -436,29 +464,31 @@ pub fn map_to_language_model_completion_events(
                                 )));
                             }
                             Some("tool_calls") => {
-                                events.extend(state.tool_calls_by_index.drain().map(
-                                    |(_, tool_call)| match serde_json::Value::from_str(
-                                        &tool_call.arguments,
-                                    ) {
-                                        Ok(input) => Ok(LanguageModelCompletionEvent::ToolUse(
-                                            LanguageModelToolUse {
-                                                id: tool_call.id.clone().into(),
-                                                name: tool_call.name.as_str().into(),
-                                                is_input_complete: true,
-                                                input,
-                                                raw_input: tool_call.arguments.clone(),
-                                            },
-                                        )),
-                                        Err(error) => {
-                                            Err(LanguageModelCompletionError::BadInputJson {
-                                                id: tool_call.id.into(),
-                                                tool_name: tool_call.name.as_str().into(),
-                                                raw_input: tool_call.arguments.into(),
-                                                json_parse_error: error.to_string(),
-                                            })
+                                events.extend(
+                                    state.tool_calls_by_index.drain().map(|(_, tool_call)| {
+                                        match serde_json::from_str::<serde_json::Value>(
+                                            &tool_call.arguments,
+                                        ) {
+                                            Ok(input) => Ok(LanguageModelCompletionEvent::ToolUse(
+                                                LanguageModelToolUse {
+                                                    id: tool_call.id.clone().into(),
+                                                    name: tool_call.name.as_str().into(),
+                                                    is_input_complete: true,
+                                                    input,
+                                                    raw_input: tool_call.arguments.clone(),
+                                                },
+                                            )),
+                                            Err(error) => {
+                                                Err(LanguageModelCompletionError::BadInputJson {
+                                                    id: tool_call.id.into(),
+                                                    tool_name: tool_call.name.as_str().into(),
+                                                    raw_input: tool_call.arguments.into(),
+                                                    json_parse_error: error.to_string(),
+                                                })
+                                            }
                                         }
-                                    },
-                                ));
+                                    }),
+                                );
 
                                 events.push(Ok(LanguageModelCompletionEvent::Stop(
                                     StopReason::ToolUse,
