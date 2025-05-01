@@ -20,6 +20,7 @@ test-support = [
 
 [dependencies]
 anyhow.workspace = true
+rand = "0.8"
 assistant_context_editor.workspace = true
 assistant_settings.workspace = true
 assistant_slash_command.workspace = true

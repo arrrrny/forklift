@@ -12,17 +12,6 @@ use ui::IconName;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DeletePathToolInput {
-    /// The path of the file or directory to delete.
-    ///
-    /// <example>
-    /// If the project has the following files:
-    ///
-    /// - directory1/a/something.txt
-    /// - directory2/a/things.txt
-    /// - directory3/a/other.txt
-    ///
-    /// You can delete the first file by providing a path of "directory1/a/something.txt"
-    /// </example>
     pub path: String,
 }
 

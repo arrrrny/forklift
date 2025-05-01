@@ -18,53 +18,17 @@ use util::markdown::MarkdownInlineCode;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CodeSymbolsInput {
-    /// The relative path of the source code file to read and get the symbols for.
-    /// This tool should only be used on source code files, never on any other type of file.
-    ///
-    /// This path should never be absolute, and the first component
-    /// of the path should always be a root directory in a project.
-    ///
-    /// If no path is specified, this tool returns a flat list of all symbols in the project
-    /// instead of a hierarchical outline of a specific file.
-    ///
-    /// <example>
-    /// If the project has the following root directories:
-    ///
-    /// - directory1
-    /// - directory2
-    ///
-    /// If you want to access `file.md` in `directory1`, you should use the path `directory1/file.md`.
-    /// If you want to access `file.md` in `directory2`, you should use the path `directory2/file.md`.
-    /// </example>
     #[serde(default)]
     pub path: Option<String>,
-
-    /// Optional regex pattern to filter symbols by name.
-    /// When provided, only symbols whose names match this pattern will be included in the results.
-    ///
-    /// <example>
-    /// To find only symbols that contain the word "test", use the regex pattern "test".
-    /// To find methods that start with "get_", use the regex pattern "^get_".
-    /// </example>
     #[serde(default)]
     pub regex: Option<String>,
-
-    /// Whether the regex is case-sensitive. Defaults to false (case-insensitive).
-    ///
-    /// <example>
-    /// Set to `true` to make regex matching case-sensitive.
-    /// </example>
     #[serde(default)]
     pub case_sensitive: bool,
-
-    /// Optional starting position for paginated results (0-based).
-    /// When not provided, starts from the beginning.
     #[serde(default)]
     pub offset: u32,
 }
 
 impl CodeSymbolsInput {
-    /// Which page of search results this is.
     pub fn page(&self) -> u32 {
         1 + (self.offset / RESULTS_PER_PAGE)
     }

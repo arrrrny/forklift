@@ -19,29 +19,15 @@ use util::paths::PathMatcher;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GrepToolInput {
-    /// A regex pattern to search for in the entire project. Note that the regex
-    /// will be parsed by the Rust `regex` crate.
-    ///
-    /// Do NOT specify a path here! This will only be matched against the code **content**.
     pub regex: String,
-
-    /// A glob pattern for the paths of files to include in the search.
-    /// Supports standard glob patterns like "**/*.rs" or "src/**/*.ts".
-    /// If omitted, all files in the project will be searched.
     pub include_pattern: Option<String>,
-
-    /// Optional starting position for paginated results (0-based).
-    /// When not provided, starts from the beginning.
     #[serde(default)]
     pub offset: u32,
-
-    /// Whether the regex is case-sensitive. Defaults to false (case-insensitive).
     #[serde(default)]
     pub case_sensitive: bool,
 }
 
 impl GrepToolInput {
-    /// Which page of search results this is.
     pub fn page(&self) -> u32 {
         1 + (self.offset / RESULTS_PER_PAGE)
     }

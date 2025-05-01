@@ -28,9 +28,7 @@ const COMMAND_OUTPUT_LIMIT: usize = 16 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TerminalToolInput {
-    /// The one-liner command to execute.
     command: String,
-    /// Working directory for the command. This must be one of the root directories of the project.
     cd: String,
 }
 
