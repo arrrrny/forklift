@@ -14,7 +14,7 @@ use std::sync::Arc;
 use ui::IconName;
 use util::markdown::MarkdownInlineCode;
 
-const MAX_FILE_SIZE_TO_READ: usize = 16384;
+// const MAX_FILE_SIZE_TO_READ: usize = 16384;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ReadFileToolInput {

@@ -256,8 +256,11 @@ impl LanguageModel for CopilotChatLanguageModel {
             | CopilotChatModel::O4Mini
             | CopilotChatModel::Gpt4o
             | CopilotChatModel::O3Mini
+            | CopilotChatModel::O3
             | CopilotChatModel::Claude3_5Sonnet
             | CopilotChatModel::Claude3_7Sonnet
+            | CopilotChatModel::Gemini25Pro
+            | CopilotChatModel::Gemini20Flash
             | CopilotChatModel::Claude3_7SonnetThinking => true,
             _ => false,
         }

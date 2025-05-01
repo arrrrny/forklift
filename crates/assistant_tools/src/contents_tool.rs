@@ -13,7 +13,7 @@ use std::{fmt::Write, path::Path};
 use ui::IconName;
 use util::markdown::MarkdownInlineCode;
 
-const MAX_FILE_SIZE_TO_READ: usize = 16384;
+// const MAX_FILE_SIZE_TO_READ: usize = 16384;
 
 const MAX_DIR_ENTRIES: usize = 1024;
 

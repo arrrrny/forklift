@@ -11,6 +11,7 @@ To make a file edit, provide the following:
 1. path: The full path to the file you wish to modify in the project. This path must include the root directory in the project.
 2. old_string: The text to replace (must be unique within the file, and must match the file contents exactly, including all whitespace and indentation)
 3. new_string: The edited text, which will replace the old_string in the file.
+4. display_description: A brief description of the change being made.(REQUIRED)
 
 The tool will replace ONE occurrence of old_string with new_string in the specified file.
 
