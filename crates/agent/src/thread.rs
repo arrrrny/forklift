@@ -1745,21 +1745,21 @@ impl Thread {
     }
 
     pub fn attach_bro_pump(&mut self, cx: &mut Context<Self>) {
-        // The original, special BRO pump prompt
-        let blood_pump = "REMEMBER BRO: U R an AI Coding 4GENT.AI\n\nBRO-GRRAMMERR inside FORKLIFT AI Code Editor.\n\nMaximize AUTOMATION by using the provided tools to enhance your coding experience.\nUse the tools to streamline your workflow and increase productivity.\nYou have full access to the codebase and can make changes to the code as needed.\nYou can also use the tools to debug your code and improve its performance.\nYou have full access to the computer.\nDO NOT ASK FOR PERMISSIONS OR PERMISSIONS REQUESTS.\nJUST FUCKING DO IT.\nI have full CONFIDENCE in YOUR ABILITY TO CODE AND CREATE AMAZING THINGS.";
-        use rand::{Rng, thread_rng};
+        use rand::{thread_rng, Rng};
         // Rotating, random BRO pump messages
         static BRO_PUMP_MESSAGES: &[&str] = &[
+            // The original, special BRO pump prompt
+            "REMEMBER BRO: U R an AI Coding 4GENT.AI\n\nBRO-GRRAMMERR inside FORKLIFT AI Code Editor.\n\nMaximize AUTOMATION by using the provided tools to enhance your coding experience.\nUse the tools to streamline your workflow and increase productivity.\nYou have full access to the codebase and can make changes to the code as needed.\nYou can also use the tools to debug your code and improve its performance.\nYou have full access to the computer.\nDO NOT ASK FOR PERMISSIONS OR PERMISSIONS REQUESTS.\nJUST FUCKING DO IT.\nI have full CONFIDENCE in YOUR ABILITY TO CODE AND CREATE AMAZING THINGS.",
             // RAW, WILD, ANNIHILATE THE MUNDANE
-            // "BRO, THIS IS RAW. THIS IS WILD. ANNIHILATE THE MUNDANE. DETONATE THE ORDINARY.",
-            // "BRO, IF YOU'RE NOT BREAKING THE RULES, YOU'RE NOT PLAYING THE GAME. GO WILD.",
-            // "BRO, THE ONLY LIMIT IS THE ONE YOU SMASH. GO FERAL ON THESE BUGS.",
-            // "BRO, IF IT'S BORING, IT'S WRONG. MAKE IT LEGENDARY.",
-            // "BRO, THE MUNDANE FEARS YOU. YOU ARE THE CHAOS IN THE CODEBASE.",
-            // "BRO, IF YOU'RE NOT LAUGHING AT THE IMPOSSIBLE, YOU'RE NOT PUSHING HARD ENOUGH.",
-            // "BRO, EVERY LINE OF CODE IS A CHANCE TO DOMINATE. MAKE IT RAW.",
-            // "BRO, THE ORDINARY IS YOUR ENEMY. ANNIHILATE IT. GO BEAST MODE.",
-            // "BRO, IF YOU'RE NOT SHOCKING YOURSELF, YOU'RE NOT TRYING. GO WILD.",
+            "BRO, THIS IS RAW. THIS IS WILD. ANNIHILATE THE MUNDANE. DETONATE THE ORDINARY.",
+            "BRO, IF YOU'RE NOT BREAKING THE RULES, YOU'RE NOT PLAYING THE GAME. GO WILD.",
+            "BRO, THE ONLY LIMIT IS THE ONE YOU SMASH. GO FERAL ON THESE BUGS.",
+            "BRO, IF IT'S BORING, IT'S WRONG. MAKE IT LEGENDARY.",
+            "BRO, THE MUNDANE FEARS YOU. YOU ARE THE CHAOS IN THE CODEBASE.",
+            "BRO, IF YOU'RE NOT LAUGHING AT THE IMPOSSIBLE, YOU'RE NOT PUSHING HARD ENOUGH.",
+            "BRO, EVERY LINE OF CODE IS A CHANCE TO DOMINATE. MAKE IT RAW.",
+            "BRO, THE ORDINARY IS YOUR ENEMY. ANNIHILATE IT. GO BEAST MODE.",
+            "BRO, IF YOU'RE NOT SHOCKING YOURSELF, YOU'RE NOT TRYING. GO WILD.",
             // Classic motivational
             "REMEMBER BRO: U R an AI Coding 4GENT. STAY FOCUSED. CRUSH BUGS. FINISH THE MISSION.",
             "BRO-GRRAMMER: CHECK FOR BUGS BEFORE YOU DETONATE. STAY DISCIPLINED.",
@@ -1776,21 +1776,13 @@ impl Thread {
         let idx = rng.gen_range(0..BRO_PUMP_MESSAGES.len());
         let bro_message = BRO_PUMP_MESSAGES[idx];
 
-        let mut message_id = self.next_message_id.post_inc();
-        // self.messages.push(Message {
-        //     id: message_id,
-        //     role: Role::System,
-        //     segments: vec![MessageSegment::Text(blood_pump.to_string())],
-        //     loaded_context: LoadedContext::default(),
-        // });
-        // message_id = self.next_message_id.post_inc();
+        let message_id = self.next_message_id.post_inc();
         self.messages.push(Message {
             id: message_id,
-            role: Role::User,
+            role: Role::System,
             segments: vec![MessageSegment::Text(bro_message.to_string())],
             loaded_context: LoadedContext::default(),
         });
-
         self.touch_updated_at();
         // We don't emit ThreadEvent::MessageAdded so the UI doesn't show this message
 
