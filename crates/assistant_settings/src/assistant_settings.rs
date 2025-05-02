@@ -12,6 +12,7 @@ use indexmap::IndexMap;
 use language_model::{CloudModel, LanguageModel};
 use lmstudio::Model as LmStudioModel;
 use ollama::Model as OllamaModel;
+use open_router::Model as OpenRouterModel;
 use schemars::{JsonSchema, schema::Schema};
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsSources};
@@ -66,6 +67,13 @@ pub enum AssistantProviderContentV1 {
     DeepSeek {
         default_model: Option<DeepseekModel>,
         api_url: Option<String>,
+    },
+
+    #[serde(rename = "openrouter")]
+    OpenRouter {
+        default_model: Option<OpenRouterModel>,
+        api_url: Option<String>,
+        available_models: Option<Vec<OpenRouterModel>>,
     },
 }
 
@@ -213,6 +221,12 @@ impl AssistantSettingsContent {
                                     model: model.id().to_string(),
                                 })
                             }
+                            AssistantProviderContentV1::OpenRouter { default_model, .. } => {
+                                default_model.map(|model| LanguageModelSelection {
+                                    provider: "openrouter".to_string(),
+                                    model: model.id().to_string(),
+                                })
+                            }
                         }),
                     inline_assistant_model: None,
                     commit_message_model: None,
@@ -353,6 +367,21 @@ impl AssistantSettingsContent {
                             settings.provider = Some(AssistantProviderContentV1::DeepSeek {
                                 default_model: DeepseekModel::from_id(&model).ok(),
                                 api_url,
+                            });
+                        }
+                        "openrouter" => {
+                            let (api_url, available_models) = match &settings.provider {
+                                Some(AssistantProviderContentV1::OpenRouter {
+                                    api_url,
+                                    available_models,
+                                    ..
+                                }) => (api_url.clone(), available_models.clone()),
+                                _ => (None, None),
+                            };
+                            settings.provider = Some(AssistantProviderContentV1::OpenRouter {
+                                default_model: OpenRouterModel::from_id(&model).ok(),
+                                api_url,
+                                available_models,
                             });
                         }
                         _ => {}
@@ -583,6 +612,7 @@ fn providers_schema(_: &mut schemars::r#gen::SchemaGenerator) -> schemars::schem
             "zed.dev".into(),
             "copilot_chat".into(),
             "deepseek".into(),
+            "openrouter".into(),
         ]),
         ..Default::default()
     }

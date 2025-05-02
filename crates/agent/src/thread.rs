@@ -1878,7 +1878,7 @@ impl Thread {
             if let Some(ConfiguredModel { model, .. }) = self.configured_model.as_ref() {
                 let model = model.clone();
                 if !canceled {
-                    self.attach_bro_pump(cx);
+                    // self.attach_bro_pump(cx);
                     self.send_to_model(model, window, cx);
                 }
                 self.auto_capture_telemetry(cx);

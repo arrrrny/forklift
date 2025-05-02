@@ -20,12 +20,14 @@ use crate::provider::{
     mistral::MistralSettings,
     ollama::OllamaSettings,
     open_ai::OpenAiSettings,
+    open_router::OpenRouterSettings,
 };
 
 /// Initializes the language model settings.
 pub fn init(fs: Arc<dyn Fs>, cx: &mut App) {
     AllLanguageModelSettings::register(cx);
 
+    // Migration logic remains the same...
     if AllLanguageModelSettings::get_global(cx)
         .openai
         .needs_setting_migration
@@ -67,6 +69,7 @@ pub struct AllLanguageModelSettings {
     pub lmstudio: LmStudioSettings,
     pub deepseek: DeepSeekSettings,
     pub mistral: MistralSettings,
+    pub openrouter: OpenRouterSettings,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -82,7 +85,11 @@ pub struct AllLanguageModelSettingsContent {
     pub deepseek: Option<DeepseekSettingsContent>,
     pub copilot_chat: Option<CopilotChatSettingsContent>,
     pub mistral: Option<MistralSettingsContent>,
+    pub open_router: Option<OpenRouterSettingsContent>,
 }
+
+// --- Content Structs for each provider ---
+// (Anthropic, Bedrock, Ollama, LmStudio, Deepseek, Mistral definitions remain the same)
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(untagged)]
@@ -194,6 +201,12 @@ pub struct MistralSettingsContent {
     pub available_models: Option<Vec<provider::mistral::AvailableModel>>,
 }
 
+#[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct OpenRouterSettingsContent {
+    pub api_url: Option<String>,
+    pub available_models: Option<Vec<provider::open_router::AvailableModel>>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(untagged)]
 pub enum OpenAiSettingsContent {
@@ -271,11 +284,14 @@ pub struct ZedDotDevSettingsContent {
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct CopilotChatSettingsContent {}
 
+// --- Main Settings Implementation ---
+
 impl settings::Settings for AllLanguageModelSettings {
     const KEY: Option<&'static str> = Some("language_models");
 
     const PRESERVED_KEYS: Option<&'static [&'static str]> = Some(&["version"]);
 
+    // FIX: Define the FileContent type
     type FileContent = AllLanguageModelSettingsContent;
 
     fn load(sources: SettingsSources<Self::FileContent>, _: &mut App) -> Result<Self> {
@@ -409,10 +425,26 @@ impl settings::Settings for AllLanguageModelSettings {
                 &mut settings.mistral.available_models,
                 mistral.as_ref().and_then(|s| s.available_models.clone()),
             );
+
+            // OpenRouter
+            let open_router = value.open_router.clone();
+            merge(
+                &mut settings.openrouter.api_url,
+                open_router.as_ref().and_then(|s| s.api_url.clone()),
+            );
+            merge(
+                &mut settings.openrouter.available_models,
+                open_router
+                    .as_ref()
+                    .and_then(|s| s.available_models.clone()),
+            );
         }
 
         Ok(settings)
     }
 
-    fn import_from_vscode(_vscode: &settings::VsCodeSettings, _current: &mut Self::FileContent) {}
+    // FIX: Add the missing import_from_vscode function
+    fn import_from_vscode(_vscode: &settings::VsCodeSettings, _current: &mut Self::FileContent) {
+        // Currently no VSCode settings to import for language models
+    }
 }

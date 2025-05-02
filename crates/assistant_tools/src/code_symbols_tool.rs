@@ -34,7 +34,7 @@ impl CodeSymbolsInput {
     }
 }
 
-const RESULTS_PER_PAGE: u32 = 2000;
+const RESULTS_PER_PAGE: u32 = 100;
 
 pub struct CodeSymbolsTool;
 
