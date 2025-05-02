@@ -269,15 +269,7 @@ impl OpenRouterLanguageModel {
         let http_client = self.http_client.clone();
         let Ok((api_key, api_url)) = cx.read_entity(&self.state, |state, cx| {
             let settings = &AllLanguageModelSettings::get_global(cx).openrouter;
-            // Use the constant from open_router crate to ensure consistency
-            let api_url = if settings.api_url.is_empty() {
-                // Provide a default base URL using the constant 
-                open_router::OPEN_ROUTER_API_URL.to_string()
-            } else {
-                // Remove trailing slash if present to avoid double slashes
-                settings.api_url.clone().trim_end_matches('/').to_string()
-            };
-            (state.api_key.clone(), api_url)
+            (state.api_key.clone(), settings.api_url.clone())
         }) else {
             return futures::future::ready(Err(anyhow!("App state dropped"))).boxed();
         };
@@ -311,15 +303,7 @@ impl LanguageModel for OpenRouterLanguageModel {
     }
 
     fn supports_tools(&self) -> bool {
-        match self.model {
-            Model::GeminiProExp
-            | Model::GeminiFlashFree
-            | Model::QwenTurbo
-            | Model::LlamaScout
-            | Model::Qwen3235b
-            | Model::GeminiFlashThinking => true,
-            _ => false,
-        }
+        true
     }
 
     fn telemetry_id(&self) -> String {
@@ -590,12 +574,10 @@ pub fn count_open_router_tokens(
             .collect::<Vec<_>>();
 
         match model {
-            open_router::Model::Custom { .. }
-            | open_router::Model::GeminiProExp
-            | open_router::Model::GeminiFlashFree => {
+            open_router::Model::Custom { .. } | open_router::Model::GeminiFlashFree => {
                 tiktoken_rs::num_tokens_from_messages("gpt-4", &messages)
             }
-            _ => tiktoken_rs::num_tokens_from_messages(model.id(), &messages),
+            _ => tiktoken_rs::num_tokens_from_messages("gpt-4", &messages),
         }
     })
     .boxed()

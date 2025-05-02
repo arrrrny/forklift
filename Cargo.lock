@@ -9698,6 +9698,8 @@ dependencies = [
  "anyhow",
  "futures 0.3.31",
  "http_client",
+ "log",
+ "openrouter_api",
  "schemars",
  "serde",
  "serde_json",
@@ -9715,6 +9717,24 @@ dependencies = [
  "dbus",
  "normpath",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "openrouter_api"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c2e4ee6059c5a6ecd214fba671bbf4dac975ef3eda811b64fd9fe47664b1bc3"
+dependencies = [
+ "async-stream",
+ "futures 0.3.31",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -12052,11 +12072,14 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-rustls 0.24.1",
+ "tokio-util",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
+ "webpki-roots 0.25.4",
  "winreg 0.50.0",
 ]
 
@@ -13705,7 +13728,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
- "webpki-roots",
+ "webpki-roots 0.26.8",
 ]
 
 [[package]]
@@ -16871,6 +16894,12 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
+version = "0.25.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
+
+[[package]]
+name = "webpki-roots"
 version = "0.26.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2210b291f7ea53617fbafcc4939f10914214ec15aace5ba62293a668f322c5c9"
@@ -18580,6 +18609,7 @@ dependencies = [
  "nix",
  "node_runtime",
  "notifications",
+ "openrouter_api",
  "outline",
  "outline_panel",
  "parking_lot",

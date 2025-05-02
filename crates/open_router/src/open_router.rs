@@ -15,11 +15,12 @@ use strum::EnumIter;
 
 pub const OPEN_ROUTER_API_URL: &str = "https://openrouter.ai/api/v1";
 
-fn is_none_or_empty_vec<T>(v: &Option<Vec<T>>) -> bool {
-    v.as_ref().map_or(true, |v| v.is_empty())
+fn is_none_or_empty<T: AsRef<[U]>, U>(opt: &Option<T>) -> bool {
+    opt.as_ref().map_or(true, |v| v.as_ref().is_empty())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     User,
     Assistant,
@@ -30,24 +31,24 @@ pub enum Role {
 impl TryFrom<String> for Role {
     type Error = anyhow::Error;
 
-    fn try_from(role: String) -> Result<Self, Self::Error> {
-        match role.as_str() {
+    fn try_from(value: String) -> Result<Self> {
+        match value.as_str() {
             "user" => Ok(Self::User),
             "assistant" => Ok(Self::Assistant),
             "system" => Ok(Self::System),
             "tool" => Ok(Self::Tool),
-            _ => anyhow::bail!("Unknown role: {}", role),
+            _ => Err(anyhow!("invalid role '{value}'")),
         }
     }
 }
 
 impl From<Role> for String {
-    fn from(role: Role) -> Self {
-        match role {
-            Role::User => "user".to_string(),
-            Role::Assistant => "assistant".to_string(),
-            Role::System => "system".to_string(),
-            Role::Tool => "tool".to_string(),
+    fn from(val: Role) -> Self {
+        match val {
+            Role::User => "user".to_owned(),
+            Role::Assistant => "assistant".to_owned(),
+            Role::System => "system".to_owned(),
+            Role::Tool => "tool".to_owned(),
         }
     }
 }
@@ -55,25 +56,49 @@ impl From<Role> for String {
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, EnumIter)]
 pub enum Model {
-    #[serde(rename = "google/gemini-2.0-flash-exp:free", alias = "google/gemini-2.0-flash-exp:free")]
+    #[serde(
+        rename = "google/gemini-2.0-flash-exp:free",
+        alias = "google/gemini-2.0-flash-exp:free"
+    )]
     GeminiFlashFree,
-    #[serde(rename = "google/gemini-2.5-pro-exp-03-25", alias = "google/gemini-2.5-pro-exp-03-25")]
+    #[serde(
+        rename = "google/gemini-2.5-pro-exp-03-25",
+        alias = "google/gemini-2.5-pro-exp-03-25"
+    )]
     GeminiProExp,
     #[serde(rename = "qwen/qwen-turbo", alias = "qwen/qwen-turbo")]
     QwenTurbo,
-    #[serde(rename = "meta-llama/llama-4-scout", alias = "meta-llama/llama-4-scout")]
+    #[serde(
+        rename = "meta-llama/llama-4-scout",
+        alias = "meta-llama/llama-4-scout"
+    )]
     LlamaScout,
     #[serde(rename = "qwen/qwen3-235b-a22b", alias = "qwen/qwen3-235b-a22b")]
     Qwen3235b,
-    #[serde(rename = "google/gemini-2.5-flash-preview:thinking", alias = "google/gemini-2.5-flash-preview:thinking")]
+    #[serde(
+        rename = "google/gemini-2.5-flash-preview:thinking",
+        alias = "google/gemini-2.5-flash-preview:thinking"
+    )]
     GeminiFlashThinking,
-    #[serde(rename = "meta-llama/llama-4-scout:free", alias = "meta-llama/llama-4-scout:free")]
+    #[serde(
+        rename = "meta-llama/llama-4-scout:free",
+        alias = "meta-llama/llama-4-scout:free"
+    )]
     LlamaScoutFree,
-    #[serde(rename = "meta-llama/llama-4-maverick:free", alias = "meta-llama/llama-4-maverick:free")]
+    #[serde(
+        rename = "meta-llama/llama-4-maverick:free",
+        alias = "meta-llama/llama-4-maverick:free"
+    )]
     LlamaMaverickFree,
-    #[serde(rename = "deepseek/deepseek-chat-v3-0324:free", alias = "deepseek/deepseek-chat-v3-0324:free")]
+    #[serde(
+        rename = "deepseek/deepseek-chat-v3-0324:free",
+        alias = "deepseek/deepseek-chat-v3-0324:free"
+    )]
     DeepseekFree,
-    #[serde(rename = "nvidia/llama-3.3-nemotron-super-49b-v1:free", alias = "nvidia/llama-3.3-nemotron-super-49b-v1:free")]
+    #[serde(
+        rename = "nvidia/llama-3.3-nemotron-super-49b-v1:free",
+        alias = "nvidia/llama-3.3-nemotron-super-49b-v1:free"
+    )]
     NvidiaNemotronFree,
     #[serde(rename = "qwen/qwen3-4b:free", alias = "qwen/qwen3-4b:free")]
     #[default]
@@ -294,7 +319,7 @@ pub struct FunctionContent {
 pub struct ResponseMessageDelta {
     pub role: Option<Role>,
     pub content: Option<String>,
-    #[serde(default, skip_serializing_if = "is_none_or_empty_vec")]
+    #[serde(default, skip_serializing_if = "is_none_or_empty")]
     pub tool_calls: Option<Vec<ToolCallChunk>>,
 }
 

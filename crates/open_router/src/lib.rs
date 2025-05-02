@@ -2,9 +2,11 @@ use std::fmt;
 
 mod open_router;
 mod model_traits;
+pub mod types;
 
 pub use open_router::*;
 pub use model_traits::*;
+pub use types::*;
 
 #[derive(Debug)]
 pub enum OpenRouterError {
