@@ -9,6 +9,7 @@ use assistant_settings::AssistantSettings;
 use assistant_tool::{ActionLog, AnyToolCard, Tool, ToolWorkingSet};
 use chrono::{DateTime, Utc};
 use collections::HashMap;
+use editor::display_map::CreaseMetadata;
 use feature_flags::{self, FeatureFlagAppExt};
 use futures::future::Shared;
 use futures::{FutureExt, StreamExt as _};
@@ -39,10 +40,10 @@ use uuid::Uuid;
 use zed_llm_client::CompletionMode;
 
 use crate::ThreadStore;
-use crate::context::{AgentContext, ContextLoadResult, LoadedContext};
+use crate::context::{AgentContext, AgentContextHandle, ContextLoadResult, LoadedContext};
 use crate::thread_store::{
-    SerializedLanguageModel, SerializedMessage, SerializedMessageSegment, SerializedThread,
-    SerializedToolResult, SerializedToolUse, SharedProjectContext,
+    SerializedCrease, SerializedLanguageModel, SerializedMessage, SerializedMessageSegment,
+    SerializedThread, SerializedToolResult, SerializedToolUse, SharedProjectContext,
 };
 use crate::tool_use::{PendingToolUse, ToolUse, ToolUseMetadata, ToolUseState};
 
@@ -96,6 +97,15 @@ impl MessageId {
     }
 }
 
+/// Stored information that can be used to resurrect a context crease when creating an editor for a past message.
+#[derive(Clone, Debug)]
+pub struct MessageCrease {
+    pub range: Range<usize>,
+    pub metadata: CreaseMetadata,
+    /// None for a deserialized message, Some otherwise.
+    pub context: Option<AgentContextHandle>,
+}
+
 /// A message in a [`Thread`].
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -103,6 +113,7 @@ pub struct Message {
     pub role: Role,
     pub segments: Vec<MessageSegment>,
     pub loaded_context: LoadedContext,
+    pub creases: Vec<MessageCrease>,
 }
 
 impl Message {
@@ -301,6 +312,21 @@ pub enum TokenUsageRatio {
     Exceeded,
 }
 
+fn default_completion_mode(cx: &App) -> CompletionMode {
+    if cx.is_staff() {
+        CompletionMode::Max
+    } else {
+        CompletionMode::Normal
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum QueueState {
+    Sending,
+    Queued { position: usize },
+    Started,
+}
+
 /// A thread of conversation with the LLM.
 pub struct Thread {
     id: ThreadId,
@@ -310,7 +336,7 @@ pub struct Thread {
     detailed_summary_task: Task<Option<()>>,
     detailed_summary_tx: postage::watch::Sender<DetailedSummaryState>,
     detailed_summary_rx: postage::watch::Receiver<DetailedSummaryState>,
-    completion_mode: Option<CompletionMode>,
+    completion_mode: CompletionMode,
     messages: Vec<Message>,
     next_message_id: MessageId,
     last_prompt_id: PromptId,
@@ -366,7 +392,7 @@ impl Thread {
             detailed_summary_task: Task::ready(None),
             detailed_summary_tx,
             detailed_summary_rx,
-            completion_mode: None,
+            completion_mode: default_completion_mode(cx),
             messages: Vec::new(),
             next_message_id: MessageId(0),
             last_prompt_id: PromptId::new(),
@@ -440,7 +466,7 @@ impl Thread {
             detailed_summary_task: Task::ready(None),
             detailed_summary_tx,
             detailed_summary_rx,
-            completion_mode: None,
+            completion_mode: default_completion_mode(cx),
             messages: serialized
                 .messages
                 .into_iter()
@@ -465,6 +491,18 @@ impl Thread {
                         text: message.context,
                         images: Vec::new(),
                     },
+                    creases: message
+                        .creases
+                        .into_iter()
+                        .map(|crease| MessageCrease {
+                            range: crease.start..crease.end,
+                            metadata: CreaseMetadata {
+                                icon_path: crease.icon_path,
+                                label: crease.label,
+                            },
+                            context: None,
+                        })
+                        .collect(),
                 })
                 .collect(),
             next_message_id,
@@ -569,11 +607,11 @@ impl Thread {
         }
     }
 
-    pub fn completion_mode(&self) -> Option<CompletionMode> {
+    pub fn completion_mode(&self) -> CompletionMode {
         self.completion_mode
     }
 
-    pub fn set_completion_mode(&mut self, mode: Option<CompletionMode>) {
+    pub fn set_completion_mode(&mut self, mode: CompletionMode) {
         self.completion_mode = mode;
     }
 
@@ -592,6 +630,12 @@ impl Thread {
 
     pub fn is_generating(&self) -> bool {
         !self.pending_completions.is_empty() || !self.all_tools_finished()
+    }
+
+    pub fn queue_state(&self) -> Option<QueueState> {
+        self.pending_completions
+            .first()
+            .map(|pending_completion| pending_completion.queue_state)
     }
 
     pub fn tools(&self) -> &Entity<ToolWorkingSet> {
@@ -818,6 +862,7 @@ impl Thread {
         text: impl Into<String>,
         loaded_context: ContextLoadResult,
         git_checkpoint: Option<GitStoreCheckpoint>,
+        creases: Vec<MessageCrease>,
         cx: &mut Context<Self>,
     ) -> MessageId {
         if !loaded_context.referenced_buffers.is_empty() {
@@ -832,6 +877,7 @@ impl Thread {
             Role::User,
             vec![MessageSegment::Text(text.into())],
             loaded_context.loaded_context,
+            creases,
             cx,
         );
 
@@ -852,7 +898,13 @@ impl Thread {
         segments: Vec<MessageSegment>,
         cx: &mut Context<Self>,
     ) -> MessageId {
-        self.insert_message(Role::Assistant, segments, LoadedContext::default(), cx)
+        self.insert_message(
+            Role::Assistant,
+            segments,
+            LoadedContext::default(),
+            Vec::new(),
+            cx,
+        )
     }
 
     pub fn insert_message(
@@ -860,6 +912,7 @@ impl Thread {
         role: Role,
         segments: Vec<MessageSegment>,
         loaded_context: LoadedContext,
+        creases: Vec<MessageCrease>,
         cx: &mut Context<Self>,
     ) -> MessageId {
         let id = self.next_message_id.post_inc();
@@ -868,6 +921,7 @@ impl Thread {
             role,
             segments,
             loaded_context,
+            creases,
         });
         self.touch_updated_at();
         cx.emit(ThreadEvent::MessageAdded(id));
@@ -987,6 +1041,16 @@ impl Thread {
                             })
                             .collect(),
                         context: message.loaded_context.text.clone(),
+                        creases: message
+                            .creases
+                            .iter()
+                            .map(|crease| SerializedCrease {
+                                start: crease.range.start,
+                                end: crease.range.end,
+                                icon_path: crease.metadata.icon_path.clone(),
+                                label: crease.metadata.label.clone(),
+                            })
+                            .collect(),
                     })
                     .collect(),
                 initial_project_snapshot,
@@ -1152,9 +1216,9 @@ impl Thread {
 
         request.tools = available_tools;
         request.mode = if model.supports_max_mode() {
-            self.completion_mode
+            Some(self.completion_mode)
         } else {
-            None
+            Some(CompletionMode::Normal)
         };
 
         request
@@ -1274,13 +1338,14 @@ impl Thread {
                 let mut stop_reason = StopReason::EndTurn;
                 let mut current_token_usage = TokenUsage::default();
 
-                if let Some(usage) = usage {
-                    thread
-                        .update(cx, |_thread, cx| {
+                thread
+                    .update(cx, |_thread, cx| {
+                        if let Some(usage) = usage {
                             cx.emit(ThreadEvent::UsageUpdated(usage));
-                        })
-                        .ok();
-                }
+                        }
+                        cx.emit(ThreadEvent::NewRequest);
+                    })
+                    .ok();
 
                 let mut request_assistant_message_id = None;
 
@@ -1419,6 +1484,20 @@ impl Thread {
                                     });
                                 }
                             }
+                            LanguageModelCompletionEvent::QueueUpdate(queue_event) => {
+                                if let Some(completion) = thread
+                                    .pending_completions
+                                    .iter_mut()
+                                    .find(|completion| completion.id == pending_completion_id)
+                                {
+                                    completion.queue_state = match queue_event {
+                                        language_model::QueueState::Queued { position } => {
+                                            QueueState::Queued { position }
+                                        }
+                                        language_model::QueueState::Started => QueueState::Started,
+                                    }
+                                }
+                            }
                         }
 
                         thread.touch_updated_at();
@@ -1539,6 +1618,7 @@ impl Thread {
 
         self.pending_completions.push(PendingCompletion {
             id: pending_completion_id,
+            queue_state: QueueState::Sending,
             _task: task,
         });
     }
@@ -1913,6 +1993,11 @@ impl Thread {
         }
 
         self.finalize_pending_checkpoint(cx);
+
+        if canceled {
+            cx.emit(ThreadEvent::CompletionCanceled);
+        }
+
         canceled
     }
 
@@ -2112,7 +2197,7 @@ impl Thread {
                 .map(|repo| {
                     repo.update(cx, |repo, _| {
                         let current_branch =
-                            repo.branch.as_ref().map(|branch| branch.name.to_string());
+                            repo.branch.as_ref().map(|branch| branch.name().to_owned());
                         repo.send_job(None, |state, _| async move {
                             let RepositoryState::Local { backend, .. } = state else {
                                 return GitState {
@@ -2459,6 +2544,7 @@ pub enum ThreadEvent {
     UsageUpdated(RequestUsage),
     StreamedCompletion,
     ReceivedTextChunk,
+    NewRequest,
     StreamedAssistantText(MessageId, String),
     StreamedAssistantThinking(MessageId, String),
     StreamedToolUse {
@@ -2489,12 +2575,14 @@ pub enum ThreadEvent {
     CheckpointChanged,
     ToolConfirmationNeeded,
     CancelEditing,
+    CompletionCanceled,
 }
 
 impl EventEmitter<ThreadEvent> for Thread {}
 
 struct PendingCompletion {
     id: usize,
+    queue_state: QueueState,
     _task: Task<()>,
 }
 
@@ -2541,7 +2629,13 @@ mod tests {
 
         // Insert user message with context
         let message_id = thread.update(cx, |thread, cx| {
-            thread.insert_user_message("Please explain this code", loaded_context, None, cx)
+            thread.insert_user_message(
+                "Please explain this code",
+                loaded_context,
+                None,
+                Vec::new(),
+                cx,
+            )
         });
 
         // Check content and context in message object
@@ -2556,7 +2650,7 @@ mod tests {
         let expected_context = format!(
             r#"
 <context>
-The following items were attached by the user. You don't need to use other tools to read them.
+The following items were attached by the user. They are up-to-date and don't need to be re-read.
 
 <files>
 ```rs {path_part}
@@ -2617,7 +2711,7 @@ fn main() {{
             .update(|cx| load_context(new_contexts, &project, &None, cx))
             .await;
         let message1_id = thread.update(cx, |thread, cx| {
-            thread.insert_user_message("Message 1", loaded_context, None, cx)
+            thread.insert_user_message("Message 1", loaded_context, None, Vec::new(), cx)
         });
 
         // Second message with contexts 1 and 2 (context 1 should be skipped as it's already included)
@@ -2632,7 +2726,7 @@ fn main() {{
             .update(|cx| load_context(new_contexts, &project, &None, cx))
             .await;
         let message2_id = thread.update(cx, |thread, cx| {
-            thread.insert_user_message("Message 2", loaded_context, None, cx)
+            thread.insert_user_message("Message 2", loaded_context, None, Vec::new(), cx)
         });
 
         // Third message with all three contexts (contexts 1 and 2 should be skipped)
@@ -2648,7 +2742,7 @@ fn main() {{
             .update(|cx| load_context(new_contexts, &project, &None, cx))
             .await;
         let message3_id = thread.update(cx, |thread, cx| {
-            thread.insert_user_message("Message 3", loaded_context, None, cx)
+            thread.insert_user_message("Message 3", loaded_context, None, Vec::new(), cx)
         });
 
         // Check what contexts are included in each message
@@ -2762,6 +2856,7 @@ fn main() {{
                 "What is the best way to learn Rust?",
                 ContextLoadResult::default(),
                 None,
+                Vec::new(),
                 cx,
             )
         });
@@ -2795,6 +2890,7 @@ fn main() {{
                 "Are there any good books?",
                 ContextLoadResult::default(),
                 None,
+                Vec::new(),
                 cx,
             )
         });
@@ -2844,7 +2940,7 @@ fn main() {{
 
         // Insert user message with the buffer as context
         thread.update(cx, |thread, cx| {
-            thread.insert_user_message("Explain this code", loaded_context, None, cx)
+            thread.insert_user_message("Explain this code", loaded_context, None, Vec::new(), cx)
         });
 
         // Create a request and check that it doesn't have a stale buffer warning yet
@@ -2878,6 +2974,7 @@ fn main() {{
                 "What does the code do now?",
                 ContextLoadResult::default(),
                 None,
+                Vec::new(),
                 cx,
             )
         });
