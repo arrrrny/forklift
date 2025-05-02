@@ -55,30 +55,30 @@ impl From<Role> for String {
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, EnumIter)]
 pub enum Model {
-    #[serde(rename = "gemini-flash-free", alias = "gemini-flash-free")]
+    #[serde(rename = "google/gemini-2.0-flash-exp:free", alias = "google/gemini-2.0-flash-exp:free")]
     GeminiFlashFree,
-    #[serde(rename = "gemini-pro-exp", alias = "gemini-pro-exp")]
+    #[serde(rename = "google/gemini-2.5-pro-exp-03-25", alias = "google/gemini-2.5-pro-exp-03-25")]
     GeminiProExp,
-    #[serde(rename = "qwen-turbo", alias = "qwen-turbo")]
+    #[serde(rename = "qwen/qwen-turbo", alias = "qwen/qwen-turbo")]
     QwenTurbo,
-    #[serde(rename = "llama-scout", alias = "llama-scout")]
+    #[serde(rename = "meta-llama/llama-4-scout", alias = "meta-llama/llama-4-scout")]
     LlamaScout,
-    #[serde(rename = "qwen-3235b", alias = "qwen-3235b")]
+    #[serde(rename = "qwen/qwen3-235b-a22b", alias = "qwen/qwen3-235b-a22b")]
     Qwen3235b,
-    #[serde(rename = "gemini-flash-thinking", alias = "gemini-flash-thinking")]
+    #[serde(rename = "google/gemini-2.5-flash-preview:thinking", alias = "google/gemini-2.5-flash-preview:thinking")]
     GeminiFlashThinking,
-    #[serde(rename = "llama-scout-free", alias = "llama-scout-free")]
+    #[serde(rename = "meta-llama/llama-4-scout:free", alias = "meta-llama/llama-4-scout:free")]
     LlamaScoutFree,
-    #[serde(rename = "llama-maverick-free", alias = "llama-maverick-free")]
+    #[serde(rename = "meta-llama/llama-4-maverick:free", alias = "meta-llama/llama-4-maverick:free")]
     LlamaMaverickFree,
-    #[serde(rename = "deepseek-free", alias = "deepseek-free")]
+    #[serde(rename = "deepseek/deepseek-chat-v3-0324:free", alias = "deepseek/deepseek-chat-v3-0324:free")]
     DeepseekFree,
-    #[serde(rename = "nvidia-nemotron-free", alias = "nvidia-nemotron-free")]
+    #[serde(rename = "nvidia/llama-3.3-nemotron-super-49b-v1:free", alias = "nvidia/llama-3.3-nemotron-super-49b-v1:free")]
     NvidiaNemotronFree,
-    #[serde(rename = "qwen-4b-free", alias = "qwen-4b-free")]
+    #[serde(rename = "qwen/qwen3-4b:free", alias = "qwen/qwen3-4b:free")]
     #[default]
     Qwen4bFree,
-    #[serde(rename = "qwen-30b-free", alias = "qwen-30b-free")]
+    #[serde(rename = "qwen/qwen3-30b-a3b:free", alias = "qwen/qwen3-30b-a3b:free")]
     Qwen30bFree,
     #[serde(rename = "custom")]
     Custom {
@@ -98,18 +98,18 @@ impl Model {
 
     pub fn from_id(id: &str) -> Result<Self> {
         match id {
-            "gemini-flash-free" => Ok(Self::GeminiFlashFree),
-            "gemini-pro-exp" => Ok(Self::GeminiProExp),
-            "qwen-turbo" => Ok(Self::QwenTurbo),
-            "llama-scout" => Ok(Self::LlamaScout),
-            "qwen-3235b" => Ok(Self::Qwen3235b),
-            "gemini-flash-thinking" => Ok(Self::GeminiFlashThinking),
-            "llama-scout-free" => Ok(Self::LlamaScoutFree),
-            "llama-maverick-free" => Ok(Self::LlamaMaverickFree),
-            "deepseek-free" => Ok(Self::DeepseekFree),
-            "nvidia-nemotron-free" => Ok(Self::NvidiaNemotronFree),
-            "qwen-4b-free" => Ok(Self::Qwen4bFree),
-            "qwen-30b-free" => Ok(Self::Qwen30bFree),
+            "google/gemini-2.0-flash-exp:free" => Ok(Self::GeminiFlashFree),
+            "google/gemini-2.5-pro-exp-03-25" => Ok(Self::GeminiProExp),
+            "qwen/qwen-turbo" => Ok(Self::QwenTurbo),
+            "meta-llama/llama-4-scout" => Ok(Self::LlamaScout),
+            "qwen/qwen3-235b-a22b" => Ok(Self::Qwen3235b),
+            "google/gemini-2.5-flash-preview:thinking" => Ok(Self::GeminiFlashThinking),
+            "meta-llama/llama-4-scout:free" => Ok(Self::LlamaScoutFree),
+            "meta-llama/llama-4-maverick:free" => Ok(Self::LlamaMaverickFree),
+            "deepseek/deepseek-chat-v3-0324:free" => Ok(Self::DeepseekFree),
+            "nvidia/llama-3.3-nemotron-super-49b-v1:free" => Ok(Self::NvidiaNemotronFree),
+            "qwen/qwen3-4b:free" => Ok(Self::Qwen4bFree),
+            "qwen/qwen3-30b-a3b:free" => Ok(Self::Qwen30bFree),
             "custom" => Err(anyhow!("custom model must be constructed with parameters")),
             _ => Err(anyhow!("invalid model id: {}", id)),
         }
@@ -117,18 +117,18 @@ impl Model {
 
     pub fn id(&self) -> &str {
         match self {
-            Self::GeminiFlashFree => "gemini-flash-free",
-            Self::GeminiProExp => "gemini-pro-exp",
-            Self::QwenTurbo => "qwen-turbo",
-            Self::LlamaScout => "llama-scout",
-            Self::Qwen3235b => "qwen-3235b",
-            Self::GeminiFlashThinking => "gemini-flash-thinking",
-            Self::LlamaScoutFree => "llama-scout-free",
-            Self::LlamaMaverickFree => "llama-maverick-free",
-            Self::DeepseekFree => "deepseek-free",
-            Self::NvidiaNemotronFree => "nvidia-nemotron-free",
-            Self::Qwen4bFree => "qwen-4b-free",
-            Self::Qwen30bFree => "qwen-30b-free",
+            Self::GeminiFlashFree => "google/gemini-2.0-flash-exp:free",
+            Self::GeminiProExp => "google/gemini-2.5-pro-exp-03-25",
+            Self::QwenTurbo => "qwen/qwen-turbo",
+            Self::LlamaScout => "meta-llama/llama-4-scout",
+            Self::Qwen3235b => "qwen/qwen3-235b-a22b",
+            Self::GeminiFlashThinking => "google/gemini-2.5-flash-preview:thinking",
+            Self::LlamaScoutFree => "meta-llama/llama-4-scout:free",
+            Self::LlamaMaverickFree => "meta-llama/llama-4-maverick:free",
+            Self::DeepseekFree => "deepseek/deepseek-chat-v3-0324:free",
+            Self::NvidiaNemotronFree => "nvidia/llama-3.3-nemotron-super-49b-v1:free",
+            Self::Qwen4bFree => "qwen/qwen3-4b:free",
+            Self::Qwen30bFree => "qwen/qwen3-30b-a3b:free",
             Self::Custom { name, .. } => name,
         }
     }

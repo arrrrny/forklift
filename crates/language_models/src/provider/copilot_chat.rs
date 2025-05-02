@@ -417,13 +417,16 @@ pub fn map_to_language_model_completion_events(
 
                         for tool_call in &delta.tool_calls {
                             // Determine the index to use for grouping tool calls
-                            let index_to_use = if let Some(idx) = tool_call.index {
-                                // If index is present, use it. If ID is also present, store the mapping.
-                                if let Some(id) = tool_call.id.clone() {
-                                    state.tool_call_id_to_index.entry(id.clone()).or_insert(idx);
-                                }
-                                idx
-                            } else if let Some(id) = tool_call.id.clone() {
+                            let index_to_use = tool_call.index;
+                            // If index is present, use it. If ID is also present, store the mapping.
+                            if let Some(id) = tool_call.id.clone() {
+                                state
+                                    .tool_call_id_to_index
+                                    .entry(id.clone())
+                                    .or_insert(index_to_use);
+                            }
+
+                            if let Some(id) = tool_call.id.clone() {
                                 // If index is missing, try to find or assign it using the ID
                                 *state
                                     .tool_call_id_to_index

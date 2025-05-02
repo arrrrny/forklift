@@ -31,11 +31,22 @@ use crate::{AllLanguageModelSettings, ui::InstructionListItem};
 const PROVIDER_ID: &str = "openrouter";
 const PROVIDER_NAME: &str = "OpenRouter";
 
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OpenRouterSettings {
     pub api_url: String,
     pub available_models: Vec<AvailableModel>,
     pub needs_setting_migration: bool,
+}
+
+impl Default for OpenRouterSettings {
+    fn default() -> Self {
+        Self {
+            // Use the constant from open_router crate to ensure consistency
+            api_url: open_router::OPEN_ROUTER_API_URL.to_string(),
+            available_models: Vec::new(),
+            needs_setting_migration: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -258,11 +269,13 @@ impl OpenRouterLanguageModel {
         let http_client = self.http_client.clone();
         let Ok((api_key, api_url)) = cx.read_entity(&self.state, |state, cx| {
             let settings = &AllLanguageModelSettings::get_global(cx).openrouter;
+            // Use the constant from open_router crate to ensure consistency
             let api_url = if settings.api_url.is_empty() {
-                // Provide a default base URL if missing
-                "https://openrouter.ai/api/v1/".to_string()
+                // Provide a default base URL using the constant 
+                open_router::OPEN_ROUTER_API_URL.to_string()
             } else {
-                settings.api_url.clone()
+                // Remove trailing slash if present to avoid double slashes
+                settings.api_url.clone().trim_end_matches('/').to_string()
             };
             (state.api_key.clone(), api_url)
         }) else {

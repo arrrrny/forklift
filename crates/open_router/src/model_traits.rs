@@ -214,18 +214,18 @@ mod tests {
     #[test]
     fn test_request_router() {
         let router = RequestRouter::new(vec![
-            "gemini-flash-free".to_string(),
-            "qwen-turbo".to_string(),
+            "google/gemini-2.0-flash-exp:free".to_string(),
+            "qwen/qwen-turbo".to_string(),
         ]);
 
         // Test normal usage
-        assert!(router.is_model_available("qwen-turbo", 1000));
+        assert!(router.is_model_available("qwen/qwen-turbo", 1000));
         
         // Test rate limiting
         for _ in 0..65 {
-            router.record_usage("qwen-turbo", 1000);
+            router.record_usage("qwen/qwen-turbo", 1000);
         }
-        assert!(!router.is_model_available("qwen-turbo", 1000));
+        assert!(!router.is_model_available("qwen/qwen-turbo", 1000));
     }
 
     #[test]
