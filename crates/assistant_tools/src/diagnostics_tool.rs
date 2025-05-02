@@ -22,7 +22,6 @@ where
     D: serde::Deserializer<'de>,
 {
     let opt = Option::<String>::deserialize(deserializer)?;
-    // The model passes an empty string sometimes
     Ok(opt.filter(|s| !s.is_empty()))
 }
 

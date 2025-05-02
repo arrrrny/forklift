@@ -23,40 +23,7 @@ pub struct StreamingEditFileTool;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct StreamingEditFileToolInput {
-    /// A one-line, user-friendly markdown description of the edit. This will be
-    /// shown in the UI and also passed to another model to perform the edit.
-    ///
-    /// Be terse, but also descriptive in what you want to achieve with this
-    /// edit. Avoid generic instructions.
-    ///
-    /// NEVER mention the file path in this description.
-    ///
-    /// <example>Fix API endpoint URLs</example>
-    /// <example>Update copyright year in `page_footer`</example>
-    ///
-    /// Make sure to include this field before all the others in the input object
-    /// so that we can display it immediately.
     pub display_description: String,
-
-    /// The full path of the file to modify in the project.
-    ///
-    /// WARNING: When specifying which file path need changing, you MUST
-    /// start each path with one of the project's root directories.
-    ///
-    /// The following examples assume we have two root directories in the project:
-    /// - backend
-    /// - frontend
-    ///
-    /// <example>
-    /// `backend/src/main.rs`
-    ///
-    /// Notice how the file path starts with root-1. Without that, the path
-    /// would be ambiguous and the call would fail!
-    /// </example>
-    ///
-    /// <example>
-    /// `frontend/db.js`
-    /// </example>
     pub path: PathBuf,
 }
 

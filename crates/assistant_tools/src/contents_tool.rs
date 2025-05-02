@@ -13,8 +13,6 @@ use std::{fmt::Write, path::Path};
 use ui::IconName;
 use util::markdown::MarkdownInlineCode;
 
-// const MAX_FILE_SIZE_TO_READ: usize = 16384;
-
 const MAX_DIR_ENTRIES: usize = 1024;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -78,8 +76,6 @@ impl Tool for ContentsTool {
             Err(err) => return Task::ready(Err(anyhow!(err))).into(),
         };
 
-        // Sometimes models will return these even though we tell it to give a path and not a glob.
-        // When this happens, just list the root worktree directories.
         if matches!(input.path.as_str(), "." | "" | "./" | "*") {
             let output = project
                 .read(cx)
@@ -115,7 +111,6 @@ impl Tool for ContentsTool {
             return Task::ready(Err(anyhow!("Path not found: {}", input.path))).into();
         };
 
-        // If it's a directory, list its contents
         if entry.is_dir() {
             let mut output = String::new();
             let start_index = input
@@ -155,7 +150,6 @@ impl Tool for ContentsTool {
 
             Task::ready(Ok(output)).into()
         } else {
-            // It's a file, so read its contents
             let file_path = input.path.clone();
             cx.spawn(async move |cx| {
                 let buffer = cx
@@ -183,7 +177,6 @@ impl Tool for ContentsTool {
 
                     Ok(result)
                 } else {
-                    // No line ranges specified, so check file size to see if it's too big.
                     let file_size = buffer.read_with(cx, |buffer, _cx| buffer.text().len())?;
 
                     if file_size <= outline::AUTO_OUTLINE_SIZE {
@@ -195,8 +188,6 @@ impl Tool for ContentsTool {
 
                         Ok(result)
                     } else {
-                        // File is too big, so return its outline and a suggestion to
-                        // read again with a line number range specified.
                         let outline = outline::file_outline(project, file_path, action_log, None, cx).await?;
 
                         Ok(format!("This file was too big to read all at once. Here is an outline of its symbols:\n\n{outline}\n\nUsing the line numbers in this outline, you can call this tool again while specifying the start and end fields to see the implementations of symbols in the outline."))

@@ -186,7 +186,6 @@ fn process_content(
         while !content.is_char_boundary(end_ix) {
             end_ix -= 1;
         }
-        // Don't truncate mid-line, clear the remainder of the last line
         end_ix = content[..end_ix].rfind('\n').unwrap_or(end_ix);
         &content[..end_ix]
     } else {
@@ -245,7 +244,6 @@ fn working_dir(
     let project = project.read(cx);
 
     if input.cd == "." {
-        // Accept "." as meaning "the one worktree" if we only have one worktree.
         let mut worktrees = project.worktrees(cx);
 
         match worktrees.next() {
@@ -260,7 +258,6 @@ fn working_dir(
             None => Ok(None),
         }
     } else if input_path.is_absolute() {
-        // Absolute paths are allowed, but only if they're in one of the project's worktrees.
         if !project
             .worktrees(cx)
             .any(|worktree| input_path.starts_with(&worktree.read(cx).abs_path()))

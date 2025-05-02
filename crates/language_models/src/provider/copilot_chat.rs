@@ -44,6 +44,13 @@ pub struct CopilotChatLanguageModelProvider {
     state: Entity<State>,
 }
 
+#[derive(Default)]
+struct RawToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
 pub struct State {
     _copilot_chat_subscription: Option<Subscription>,
     _settings_subscription: Subscription,
@@ -193,31 +200,6 @@ impl CopilotChatLanguageModel {
             .tools
             .iter()
             .map(|tool| {
-                // if tool.name == "code_symbols"
-                //     || tool.name == "code_actions"
-                //     || tool.name == "edit_file"
-                // {
-                //     // Provide a simplified schema and description
-                //     return Tool::Function {
-                //         function: copilot::copilot_chat::Function {
-                //             name: tool.name.clone(),
-                //             description: format!("Tool for {}", tool.name), // Simplified description
-                //             parameters: serde_json::json!({
-                //                 "type": "object",
-                //                 "properties": {
-                //                     "path": {"type": "string", "description": "File path"}
-                //                 },
-                //                 "required": ["path"]
-                //             }),
-                //         },
-                //     };
-                // }
-                // Get the schema from our map (guaranteed to exist since we built it from these tools)
-                let parameters = schema_map.get(&tool.name).cloned().unwrap_or_else(|| {
-                    log::warn!("Missing schema for tool {}, using empty schema", tool.name);
-                    serde_json::json!({})
-                });
-
                 let tool_name = match tool.name.as_str() {
                     name => name.to_string(),
                 };
@@ -226,7 +208,7 @@ impl CopilotChatLanguageModel {
                     function: copilot::copilot_chat::Function {
                         name: tool_name,
                         description: tool.description.clone(),
-                        parameters: ensure_valid_schema(parameters),
+                        parameters: tool.input_schema.clone(),
                     },
                 }
             })
@@ -416,17 +398,13 @@ pub fn map_to_language_model_completion_events(
                         }
 
                         for tool_call in &delta.tool_calls {
-                            // Determine the index to use for grouping tool calls
-                            let index_to_use = tool_call.index;
-                            // If index is present, use it. If ID is also present, store the mapping.
-                            if let Some(id) = tool_call.id.clone() {
-                                state
-                                    .tool_call_id_to_index
-                                    .entry(id.clone())
-                                    .or_insert(index_to_use);
-                            }
-
-                            if let Some(id) = tool_call.id.clone() {
+                            let index_to_use = if let Some(idx) = tool_call.index {
+                                // If index is present, use it. If ID is also present, store the mapping.
+                                if let Some(id) = tool_call.id.clone() {
+                                    state.tool_call_id_to_index.entry(id.clone()).or_insert(idx);
+                                }
+                                idx
+                            } else if let Some(id) = tool_call.id.clone() {
                                 // If index is missing, try to find or assign it using the ID
                                 *state
                                     .tool_call_id_to_index
@@ -442,22 +420,6 @@ pub fn map_to_language_model_completion_events(
                                 state.next_tool_call_index += 1;
                                 new_index
                             };
-
-                            let entry = state.tool_calls_by_index.entry(index_to_use).or_default();
-
-                            if let Some(tool_id) = tool_call.id.clone() {
-                                entry.id = tool_id;
-                            }
-
-                            if let Some(function) = tool_call.function.as_ref() {
-                                if let Some(name) = function.name.clone() {
-                                    entry.name = name;
-                                }
-
-                                if let Some(arguments) = function.arguments.clone() {
-                                    entry.arguments.push_str(&arguments);
-                                }
-                            }
                         }
 
                         match choice.finish_reason.as_deref() {
@@ -655,7 +617,7 @@ fn ensure_valid_schema(schema: serde_json::Value) -> serde_json::Value {
         schema
     } else {
         log::error!("Invalid schema format, using empty schema");
-        serde_json::json!({})
+        serde_json::json!({"type": "object", "properties": {}})
     }
 }
 

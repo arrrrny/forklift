@@ -118,8 +118,8 @@ impl Tool for GrepTool {
             false,
             false,
             include_matcher,
-            PathMatcher::default(), // For now, keep it simple and don't enable an exclude pattern.
-            true, // Always match file include pattern against *full project paths* that start with a project root.
+            PathMatcher::default(),
+            true,
             None,
         ) {
             Ok(query) => query,
@@ -195,7 +195,6 @@ impl Tool for GrepTool {
                         continue;
                     }
 
-                    // We'd already found a full page of matches, and we just found one more.
                     if matches_found >= RESULTS_PER_PAGE {
                         has_more_matches = true;
                         break 'outer;
@@ -296,7 +295,6 @@ mod tests {
 
         let project = Project::test(fs.clone(), [path!("/root").as_ref()], cx).await;
 
-        // Test with include pattern for Rust files inside the root of the project
         let input = serde_json::to_value(GrepToolInput {
             regex: "println".to_string(),
             include_pattern: Some("root/**/*.rs".to_string()),
@@ -316,7 +314,6 @@ mod tests {
             "Should not include test_main.rs even though it's a .rs file (because it doesn't have the pattern)"
         );
 
-        // Test with include pattern for src directory only
         let input = serde_json::to_value(GrepToolInput {
             regex: "fn".to_string(),
             include_pattern: Some("root/**/src/**".to_string()),
@@ -339,7 +336,6 @@ mod tests {
             "Should not include test_main.rs as it's not in src directory"
         );
 
-        // Test with empty include pattern (should default to all files)
         let input = serde_json::to_value(GrepToolInput {
             regex: "fn".to_string(),
             include_pattern: None,
@@ -376,7 +372,6 @@ mod tests {
 
         let project = Project::test(fs.clone(), [path!("/root").as_ref()], cx).await;
 
-        // Test case-insensitive search (default)
         let input = serde_json::to_value(GrepToolInput {
             regex: "uppercase".to_string(),
             include_pattern: Some("**/*.txt".to_string()),
@@ -391,7 +386,6 @@ mod tests {
             "Case-insensitive search should match uppercase"
         );
 
-        // Test case-sensitive search
         let input = serde_json::to_value(GrepToolInput {
             regex: "uppercase".to_string(),
             include_pattern: Some("**/*.txt".to_string()),
@@ -406,7 +400,6 @@ mod tests {
             "Case-sensitive search should not match uppercase"
         );
 
-        // Test case-sensitive search
         let input = serde_json::to_value(GrepToolInput {
             regex: "LOWERCASE".to_string(),
             include_pattern: Some("**/*.txt".to_string()),
@@ -422,7 +415,6 @@ mod tests {
             "Case-sensitive search should match lowercase"
         );
 
-        // Test case-sensitive search for lowercase pattern
         let input = serde_json::to_value(GrepToolInput {
             regex: "lowercase".to_string(),
             include_pattern: Some("**/*.txt".to_string()),
@@ -438,7 +430,6 @@ mod tests {
         );
     }
 
-    /// Helper function to set up a syntax test environment
     async fn setup_syntax_test(cx: &mut TestAppContext) -> Entity<Project> {
         use unindent::Unindent;
         init_test(cx);
@@ -446,7 +437,6 @@ mod tests {
 
         let fs = FakeFs::new(cx.executor().clone());
 
-        // Create test file with syntax structures
         fs.insert_tree(
             "/root",
             serde_json::json!({
@@ -524,7 +514,6 @@ mod tests {
     async fn test_grep_top_level_function(cx: &mut TestAppContext) {
         let project = setup_syntax_test(cx).await;
 
-        // Test: Line at the top level of the file
         let input = serde_json::to_value(GrepToolInput {
             regex: "This is at the top level".to_string(),
             include_pattern: Some("**/*.rs".to_string()),
@@ -554,7 +543,6 @@ mod tests {
     async fn test_grep_function_body(cx: &mut TestAppContext) {
         let project = setup_syntax_test(cx).await;
 
-        // Test: Line inside a function body
         let input = serde_json::to_value(GrepToolInput {
             regex: "Function in nested module".to_string(),
             include_pattern: Some("**/*.rs".to_string()),
@@ -586,7 +574,6 @@ mod tests {
     async fn test_grep_function_args_and_body(cx: &mut TestAppContext) {
         let project = setup_syntax_test(cx).await;
 
-        // Test: Line with a function argument
         let input = serde_json::to_value(GrepToolInput {
             regex: "second_arg".to_string(),
             include_pattern: Some("**/*.rs".to_string()),
@@ -622,7 +609,6 @@ mod tests {
         use unindent::Unindent;
         let project = setup_syntax_test(cx).await;
 
-        // Test: Line inside an if block
         let input = serde_json::to_value(GrepToolInput {
             regex: "Inside if block".to_string(),
             include_pattern: Some("**/*.rs".to_string()),
@@ -653,7 +639,6 @@ mod tests {
         use unindent::Unindent;
         let project = setup_syntax_test(cx).await;
 
-        // Test: Line in the middle of a long function - should show message about remaining lines
         let input = serde_json::to_value(GrepToolInput {
             regex: "Line 5".to_string(),
             include_pattern: Some("**/*.rs".to_string()),

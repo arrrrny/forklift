@@ -51,7 +51,6 @@ impl Tool for ThinkingTool {
         _window: Option<AnyWindowHandle>,
         _cx: &mut App,
     ) -> ToolResult {
-        // This tool just "thinks out loud" and doesn't perform any actions.
         Task::ready(match serde_json::from_value::<ThinkingToolInput>(input) {
             Ok(_input) => Ok("Finished thinking.".to_string()),
             Err(err) => Err(anyhow!(err)),

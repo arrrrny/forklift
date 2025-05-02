@@ -161,11 +161,11 @@ impl Model {
     pub fn display_name(&self) -> &str {
         match self {
             Self::GeminiFlashFree => "Gemini Flash 1M (Free) Tools",
-            Self::GeminiProExp => "Gemini Pro Exp 1M (Free) Tools",
             Self::QwenTurbo => "Qwen Turbo 1M ($0.05/$0.20) Tools",
             Self::LlamaScout => "Llama Scout 128K ($0.11/$0.34) Tools",
             Self::Qwen3235b => "Qwen3 235B 128K ($0.20/$0.80) Tools",
             Self::GeminiFlashThinking => "Gemini Flash Thinking 1M ($0.15/$3.50) Tools",
+            Self::GeminiProExp => "Gemini Pro Exp 1M (Free)",
             Self::LlamaScoutFree => "Llama Scout 512K (Free)",
             Self::LlamaMaverickFree => "Llama Maverick 256K (Free)",
             Self::DeepseekFree => "Deepseek 160K (Free)",

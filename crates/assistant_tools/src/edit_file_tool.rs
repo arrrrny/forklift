@@ -147,10 +147,8 @@ impl Tool for EditFileTool {
 
             let result = cx
                 .background_spawn(async move {
-                    // Try to match exactly
                     let diff = replace_exact(&input.old_string, &input.new_string, &snapshot)
                         .await
-                        // If that fails, try being flexible about indentation
                         .or_else(|| {
                             replace_with_flexible_indent(
                                 &input.old_string,

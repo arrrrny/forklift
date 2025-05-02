@@ -14,8 +14,6 @@ use std::sync::Arc;
 use ui::IconName;
 use util::markdown::MarkdownInlineCode;
 
-// const MAX_FILE_SIZE_TO_READ: usize = 16384;
-
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ReadFileToolInput {
     pub path: String,
@@ -103,11 +101,9 @@ impl Tool for ReadFileTool {
                 })?
                 .await?;
 
-            // Check if specific line ranges are provided
             if input.start_line.is_some() || input.end_line.is_some() {
                 let result = buffer.read_with(cx, |buffer, _cx| {
                     let text = buffer.text();
-                    // .max(1) because despite instructions to be 1-indexed, sometimes the model passes 0.
                     let start = input.start_line.unwrap_or(1).max(1);
                     let lines = text.split('\n').skip(start - 1);
                     if let Some(end) = input.end_line {
@@ -124,11 +120,9 @@ impl Tool for ReadFileTool {
 
                 Ok(result)
             } else {
-                // No line ranges specified, so check file size to see if it's too big.
                 let file_size = buffer.read_with(cx, |buffer, _cx| buffer.text().len())?;
 
                 if file_size <= outline::AUTO_OUTLINE_SIZE {
-                    // File is small enough, so return its contents.
                     let result = buffer.read_with(cx, |buffer, _cx| buffer.text())?;
 
                     action_log.update(cx, |log, cx| {
@@ -137,8 +131,6 @@ impl Tool for ReadFileTool {
 
                     Ok(result)
                 } else {
-                    // File is too big, so return the outline
-                    // and a suggestion to read again with line numbers.
                     let outline = outline::file_outline(project, file_path, action_log, None, cx).await?;
                     Ok(formatdoc! {"
                         This file was too big to read all at once. Here is an outline of its symbols:
@@ -360,7 +352,6 @@ mod test {
             .await;
         assert_eq!(result.unwrap(), "Line 1");
 
-        // when start_line > end_line, should still return at least 1 line
         let result = cx
             .update(|cx| {
                 let input = json!({

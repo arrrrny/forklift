@@ -59,7 +59,6 @@ impl Tool for OpenTool {
             Err(err) => return Task::ready(Err(anyhow!(err))).into(),
         };
 
-        // If path_or_url turns out to be a path in the project, make it absolute.
         let abs_path = to_absolute_path(&input.path_or_url, project, cx);
 
         cx.background_spawn(async move {
@@ -116,13 +115,9 @@ mod tests {
         )
         .await;
 
-        // Use the temp_path as the root directory, not just its filename
         let project = Project::test(fs.clone(), [temp_dir.path()], cx).await;
 
-        // Test cases where the function should return Some
         cx.update(|cx| {
-            // Project-relative paths should return Some
-            // Create paths using the last segment of the temp path to simulate a project-relative path
             let root_dir_name = Path::new(&temp_path)
                 .file_name()
                 .unwrap_or_else(|| std::ffi::OsStr::new("temp"))
@@ -144,11 +139,9 @@ mod tests {
                 "Failed to resolve readme.md path"
             );
 
-            // External URL should return None
             let result = to_absolute_path("https://example.com", project.clone(), cx);
             assert_eq!(result, None, "External URLs should return None");
 
-            // Path outside project
             let result = to_absolute_path("../invalid/path", project.clone(), cx);
             assert_eq!(result, None, "Paths outside the project should return None");
         });

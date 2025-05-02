@@ -192,7 +192,6 @@ fn find_symbol_range(
     let mut positions = text.match_indices(&search_string);
     let position = positions.next()?.0;
 
-    // The combined string must appear exactly once.
     if positions.next().is_some() {
         return None;
     }
@@ -240,7 +239,6 @@ fn render_locations(locations: impl IntoIterator<Item = Location>, cx: &mut Asyn
             .ok();
     }
 
-    // Trim trailing newlines without reallocating.
     answer.truncate(answer.trim_end().len());
 
     answer

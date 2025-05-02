@@ -57,7 +57,6 @@ pub fn replace_with_flexible_indent(old: &str, new: &str, buffer: &BufferSnapsho
         let end_row = start_row + old_lines.len().saturating_sub(1) as u32;
 
         if end_row > max_row {
-            // The buffer ends before fully matching the pattern
             return None;
         }
 
@@ -373,7 +372,6 @@ mod flexible_indent_tests {
 
     #[gpui::test]
     fn test_replace_with_empty_lines(cx: &mut TestAppContext) {
-        // Test with empty lines
         let whole = r#"
             fn test() {
                 let x = 5;
@@ -457,7 +455,6 @@ mod flexible_indent_tests {
         "#
         .unindent();
 
-        // Should return None because whole doesn't fully contain the old text
         assert_eq!(
             test_replace_with_flexible_indent(cx, &whole, &old, &new),
             None
@@ -531,31 +528,25 @@ mod flexible_indent_tests {
 
     #[test]
     fn test_lines_with_min_indent() {
-        // Empty string
         assert_eq!(lines_with_min_indent(""), (vec![], 0));
 
-        // Single line without indentation
         assert_eq!(lines_with_min_indent("hello"), (vec!["hello"], 0));
 
-        // Multiple lines with no indentation
         assert_eq!(
             lines_with_min_indent("line1\nline2\nline3"),
             (vec!["line1", "line2", "line3"], 0)
         );
 
-        // Multiple lines with consistent indentation
         assert_eq!(
             lines_with_min_indent("  line1\n  line2\n  line3"),
             (vec!["  line1", "  line2", "  line3"], 2)
         );
 
-        // Multiple lines with varying indentation
         assert_eq!(
             lines_with_min_indent("    line1\n  line2\n      line3"),
             (vec!["    line1", "  line2", "      line3"], 2)
         );
 
-        // Lines with mixed indentation and empty lines
         assert_eq!(
             lines_with_min_indent("    line1\n\n  line2"),
             (vec!["    line1", "", "  line2"], 2)
@@ -688,28 +679,22 @@ mod flexible_indent_tests {
 
     #[test]
     fn test_drop_lines_prefix() {
-        // Empty array
         assert_eq!(drop_lines_prefix(&[], 2), Vec::<&str>::new());
 
-        // Zero prefix length
         assert_eq!(
             drop_lines_prefix(&["line1", "line2"], 0),
             vec!["line1", "line2"]
         );
 
-        // Normal prefix drop
         assert_eq!(
             drop_lines_prefix(&["  line1", "  line2"], 2),
             vec!["line1", "line2"]
         );
 
-        // Prefix longer than some lines
         assert_eq!(drop_lines_prefix(&["  line1", "a"], 2), vec!["line1", ""]);
 
-        // Prefix longer than all lines
         assert_eq!(drop_lines_prefix(&["a", "b"], 5), vec!["", ""]);
 
-        // Mixed length lines
         assert_eq!(
             drop_lines_prefix(&["    line1", "  line2", "      line3"], 2),
             vec!["  line1", "line2", "    line3"]
@@ -777,7 +762,6 @@ mod flexible_indent_tests {
             cx.new(|cx| language::Buffer::local("let x = 41;\nlet y = 41;\nlet z = 41;", cx));
         let snapshot = buffer.read_with(cx, |buffer, _cx| buffer.snapshot());
 
-        // Should replace only the first occurrence
         let diff = replace_exact("let x = 41;", "let x = 42;", &snapshot).await;
         assert!(diff.is_some());
 
@@ -804,7 +788,6 @@ mod flexible_indent_tests {
         let buffer = cx.new(|cx| language::Buffer::local("let x = 41; let y = 42;", cx));
         let snapshot = buffer.read_with(cx, |buffer, _cx| buffer.snapshot());
 
-        // Verify substring replacement actually works
         let diff = replace_exact("let x = 41", "let x = 42", &snapshot).await;
         assert!(diff.is_some());
 
@@ -849,13 +832,10 @@ mod flexible_indent_tests {
         old: &str,
         new: &str,
     ) -> Option<String> {
-        // Create a local buffer with the test content
         let buffer = cx.new(|cx| language::Buffer::local(whole, cx));
 
-        // Get the buffer snapshot
         let buffer_snapshot = buffer.read_with(cx, |buffer, _cx| buffer.snapshot());
 
-        // Call replace_flexible and transform the result
         replace_with_flexible_indent(old, new, &buffer_snapshot).map(|diff| {
             buffer.update(cx, |buffer, cx| {
                 let _ = buffer.apply_diff(diff, cx);

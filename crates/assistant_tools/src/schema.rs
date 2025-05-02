@@ -52,8 +52,6 @@ impl schemars::visit::Visitor for TransformToJsonSchemaSubsetVisitor {
     }
 
     fn visit_schema_object(&mut self, schema: &mut SchemaObject) {
-        // Ensure that the type field is not an array, this happens when we use
-        // Option<T>, the type will be [T, "null"].
         if let Some(instance_type) = schema.instance_type.take() {
             schema.instance_type = match instance_type {
                 schemars::schema::SingleOrVec::Single(t) => {
@@ -66,7 +64,6 @@ impl schemars::visit::Visitor for TransformToJsonSchemaSubsetVisitor {
             };
         }
 
-        // One of is not supported, use anyOf instead.
         if let Some(subschema) = schema.subschemas.as_mut() {
             if let Some(one_of) = subschema.one_of.take() {
                 subschema.any_of = Some(one_of);

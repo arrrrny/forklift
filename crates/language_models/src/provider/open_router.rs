@@ -303,7 +303,14 @@ impl LanguageModel for OpenRouterLanguageModel {
     }
 
     fn supports_tools(&self) -> bool {
-        true
+        match self.model {
+            Model::GeminiProExp
+            | Model::QwenTurbo
+            | Model::LlamaScout
+            | Model::Qwen3235b
+            | Model::GeminiFlashThinking => true,
+            _ => false,
+        }
     }
 
     fn telemetry_id(&self) -> String {
@@ -340,9 +347,23 @@ impl LanguageModel for OpenRouterLanguageModel {
         >,
     > {
         let request = into_open_router(request, &self.model, self.max_output_tokens());
+        if let Ok(json) = serde_json::to_string_pretty(&request) {
+            log::error!("Final request payload to OpenRouter: {}", json);
+        } else {
+            log::error!("Failed to serialize request for logging");
+        }
         let completions = self.stream_completion(request, cx);
         async move { Ok(map_to_language_model_completion_events(completions.await?).boxed()) }
             .boxed()
+    }
+}
+
+fn ensure_valid_schema(schema: serde_json::Value) -> serde_json::Value {
+    if schema.is_object() {
+        schema
+    } else {
+        log::error!("Invalid schema format, using empty schema");
+        serde_json::json!({"type": "object", "properties": {}})
     }
 }
 
@@ -425,7 +446,7 @@ pub fn into_open_router(
                 function: open_router::FunctionDefinition {
                     name: tool.name,
                     description: Some(tool.description),
-                    parameters: Some(tool.input_schema),
+                    parameters: Some(ensure_valid_schema(tool.input_schema)),
                 },
             })
             .collect(),

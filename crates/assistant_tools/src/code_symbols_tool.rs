@@ -145,7 +145,6 @@ async fn project_symbols(
             }
         })
         .skip(offset as usize)
-        // Take 1 more than RESULTS_PER_PAGE so we can tell if there are more results.
         .take((RESULTS_PER_PAGE as usize).saturating_add(1))
     {
         if let Some(worktree_path) = project.read_with(cx, |project, cx| {
@@ -158,7 +157,6 @@ async fn project_symbols(
         }
     }
 
-    // If no symbols matched the filter, return early
     if symbols_by_path.is_empty() {
         return Err(anyhow!("No symbols found matching the criteria."));
     }
@@ -182,7 +180,6 @@ async fn project_symbols(
 
             write!(&mut output, "  {} ", symbol.label.text()).ok();
 
-            // Convert to 1-based line numbers for display
             let start_line = symbol.range.start.0.row as usize + 1;
             let end_line = symbol.range.end.0.row as usize + 1;
 
