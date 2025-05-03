@@ -457,7 +457,7 @@ pub fn into_open_router(
 pub fn map_to_language_model_completion_events(
     events: Pin<Box<dyn Send + Stream<Item = Result<ResponseStreamEvent>>>>,
 ) -> impl Stream<Item = Result<LanguageModelCompletionEvent, LanguageModelCompletionError>> {
-    #[derive(Default)]
+    #[derive(Default, Deserialize)]
     struct RawToolCall {
         id: String,
         name: String,

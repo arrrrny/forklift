@@ -44,13 +44,6 @@ pub struct CopilotChatLanguageModelProvider {
     state: Entity<State>,
 }
 
-#[derive(Default)]
-struct RawToolCall {
-    id: String,
-    name: String,
-    arguments: String,
-}
-
 pub struct State {
     _copilot_chat_subscription: Option<Subscription>,
     _settings_subscription: Subscription,
@@ -420,6 +413,22 @@ pub fn map_to_language_model_completion_events(
                                 state.next_tool_call_index += 1;
                                 new_index
                             };
+
+                            let entry = state.tool_calls_by_index.entry(index_to_use).or_default();
+
+                            if let Some(tool_id) = tool_call.id.clone() {
+                                entry.id = tool_id;
+                            }
+
+                            if let Some(function) = tool_call.function.as_ref() {
+                                if let Some(name) = function.name.clone() {
+                                    entry.name = name;
+                                }
+
+                                if let Some(arguments) = function.arguments.clone() {
+                                    entry.arguments.push_str(&arguments);
+                                }
+                            }
                         }
 
                         match choice.finish_reason.as_deref() {
@@ -612,14 +621,14 @@ impl ConfigurationView {
     }
 }
 // Helper to ensure we always return a valid schema
-fn ensure_valid_schema(schema: serde_json::Value) -> serde_json::Value {
-    if schema.is_object() {
-        schema
-    } else {
-        log::error!("Invalid schema format, using empty schema");
-        serde_json::json!({"type": "object", "properties": {}})
-    }
-}
+// fn ensure_valid_schema(schema: serde_json::Value) -> serde_json::Value {
+//     if schema.is_object() {
+//         schema
+//     } else {
+//         log::error!("Invalid schema format, using empty schema");
+//         serde_json::json!({"type": "object", "properties": {}})
+//     }
+// }
 
 impl Render for ConfigurationView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
