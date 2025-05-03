@@ -304,11 +304,13 @@ impl LanguageModel for OpenRouterLanguageModel {
 
     fn supports_tools(&self) -> bool {
         match self.model {
-            Model::GeminiProExp
+            Model::GeminiFlashLite001
+            | Model::GeminiFlash001
+            | Model::Mistral3b
+            | Model::Mistral7bFree
             | Model::QwenTurbo
             | Model::LlamaScout
-            | Model::Qwen3235b
-            | Model::GeminiFlashThinking => true,
+            | Model::Qwen3235b => true,
             _ => false,
         }
     }

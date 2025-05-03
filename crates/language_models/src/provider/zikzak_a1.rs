@@ -1,3 +1,4 @@
+```rs
 // use std::sync::Arc;
 // use anyhow::{Result, anyhow};
 // use futures::{BoxFuture, Stream, StreamExt};
@@ -165,9 +166,4 @@
 //                 model.stream_completion(request, cx)
 //             }
 //             Backend::Anthropic => {
-//                 let model = self.anthropic.provided_models(&cx.as_app()).into_iter().find(|m| m.name().0.contains("Sonnet")).unwrap();
-//                 model.stream_completion(request, cx)
-//             }
-//         }
-//     }
-// }
+//                 let model = self.anthropic.provided_models(&cx.as_app()).into

@@ -1,11 +1,8 @@
 use copilot::copilot_chat::ToolChoice;
-use std::collections::BTreeMap;
 use std::pin::Pin;
-use std::str::FromStr as _;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use collections::HashMap;
 use copilot::copilot_chat::{
     ChatMessage, CopilotChat, Model as CopilotChatModel, Request as CopilotChatRequest,
     ResponseEvent, Tool, ToolCall,
@@ -181,13 +178,6 @@ impl CopilotChatLanguageModel {
     }
 
     fn convert_tools(&self, request: &LanguageModelRequest) -> Vec<Tool> {
-        // First build schema map from request tools
-        let schema_map: HashMap<String, serde_json::Value> = request
-            .tools
-            .iter()
-            .map(|tool| (tool.name.clone(), tool.input_schema.clone()))
-            .collect();
-
         // Then create tools with proper schemas
         request
             .tools

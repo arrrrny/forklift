@@ -2510,13 +2510,13 @@ impl Thread {
         let bro_message = BRO_PUMP_MESSAGES[idx];
 
         let message_id = self.next_message_id.post_inc();
-        // self.messages.push(Message {
-        //     id: message_id,
-        //     role: Role::User,
-        //     segments: vec![MessageSegment::Text(bro_message.to_string())],
-        //     loaded_context: LoadedContext::default(),
-        //     creases: vec![],
-        // });
+        self.messages.push(Message {
+            id: message_id,
+            role: Role::User,
+            segments: vec![MessageSegment::Text(bro_message.to_string())],
+            loaded_context: LoadedContext::default(),
+            creases: vec![],
+        });
         self.touch_updated_at();
         // We don't emit ThreadEvent::MessageAdded so the UI doesn't show this message
 

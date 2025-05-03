@@ -56,6 +56,17 @@ impl From<Role> for String {
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, EnumIter)]
 pub enum Model {
+    // --- Tools models, sorted by context descending ---
+    #[serde(
+        rename = "google/gemini-2.0-flash-001",
+        alias = "google/gemini-2.0-flash-001"
+    )]
+    GeminiFlash001,
+    #[serde(
+        rename = "google/gemini-2.0-flash-lite-001",
+        alias = "google/gemini-2.0-flash-lite-001"
+    )]
+    GeminiFlashLite001,
     #[serde(
         rename = "google/gemini-2.0-flash-exp:free",
         alias = "google/gemini-2.0-flash-exp:free"
@@ -73,13 +84,17 @@ pub enum Model {
         alias = "meta-llama/llama-4-scout"
     )]
     LlamaScout,
+    #[serde(rename = "mistralai/ministral-3b", alias = "mistralai/ministral-3b")]
+    Mistral3b,
+    #[serde(
+        rename = "mistralai/mistral-7b-instruct:free",
+        alias = "mistralai/mistral-7b-instruct:free"
+    )]
+    Mistral7bFree,
+
+    // --- Non-tools/free models, sorted by context descending ---
     #[serde(rename = "qwen/qwen3-235b-a22b", alias = "qwen/qwen3-235b-a22b")]
     Qwen3235b,
-    #[serde(
-        rename = "google/gemini-2.5-flash-preview:thinking",
-        alias = "google/gemini-2.5-flash-preview:thinking"
-    )]
-    GeminiFlashThinking,
     #[serde(
         rename = "meta-llama/llama-4-scout:free",
         alias = "meta-llama/llama-4-scout:free"
@@ -123,12 +138,15 @@ impl Model {
 
     pub fn from_id(id: &str) -> Result<Self> {
         match id {
+            "google/gemini-2.0-flash-001" => Ok(Self::GeminiFlash001),
+            "google/gemini-2.0-flash-lite-001" => Ok(Self::GeminiFlashLite001),
             "google/gemini-2.0-flash-exp:free" => Ok(Self::GeminiFlashFree),
             "google/gemini-2.5-pro-exp-03-25" => Ok(Self::GeminiProExp),
             "qwen/qwen-turbo" => Ok(Self::QwenTurbo),
             "meta-llama/llama-4-scout" => Ok(Self::LlamaScout),
+            "mistralai/ministral-3b" => Ok(Self::Mistral3b),
+            "mistralai/mistral-7b-instruct:free" => Ok(Self::Mistral7bFree),
             "qwen/qwen3-235b-a22b" => Ok(Self::Qwen3235b),
-            "google/gemini-2.5-flash-preview:thinking" => Ok(Self::GeminiFlashThinking),
             "meta-llama/llama-4-scout:free" => Ok(Self::LlamaScoutFree),
             "meta-llama/llama-4-maverick:free" => Ok(Self::LlamaMaverickFree),
             "deepseek/deepseek-chat-v3-0324:free" => Ok(Self::DeepseekFree),
@@ -142,12 +160,15 @@ impl Model {
 
     pub fn id(&self) -> &str {
         match self {
+            Self::GeminiFlash001 => "google/gemini-2.0-flash-001",
+            Self::GeminiFlashLite001 => "google/gemini-2.0-flash-lite-001",
             Self::GeminiFlashFree => "google/gemini-2.0-flash-exp:free",
             Self::GeminiProExp => "google/gemini-2.5-pro-exp-03-25",
             Self::QwenTurbo => "qwen/qwen-turbo",
             Self::LlamaScout => "meta-llama/llama-4-scout",
+            Self::Mistral3b => "mistralai/ministral-3b",
+            Self::Mistral7bFree => "mistralai/mistral-7b-instruct:free",
             Self::Qwen3235b => "qwen/qwen3-235b-a22b",
-            Self::GeminiFlashThinking => "google/gemini-2.5-flash-preview:thinking",
             Self::LlamaScoutFree => "meta-llama/llama-4-scout:free",
             Self::LlamaMaverickFree => "meta-llama/llama-4-maverick:free",
             Self::DeepseekFree => "deepseek/deepseek-chat-v3-0324:free",
@@ -160,11 +181,13 @@ impl Model {
 
     pub fn display_name(&self) -> &str {
         match self {
-            Self::GeminiFlashFree => "Gemini Flash 1M (Free) Tools",
+            Self::GeminiFlash001 => "Gemini Flash 1M ($0.10/$0.40) Tools",
+            Self::GeminiFlashLite001 => "Gemini Flash Lite 1M ($0.075/$0.30) Tools",
             Self::QwenTurbo => "Qwen Turbo 1M ($0.05/$0.20) Tools",
             Self::LlamaScout => "Llama Scout 128K ($0.11/$0.34) Tools",
-            Self::Qwen3235b => "Qwen3 235B 128K ($0.20/$0.80) Tools",
-            Self::GeminiFlashThinking => "Gemini Flash Thinking 1M ($0.15/$3.50) Tools",
+            Self::Mistral3b => "Mistral 3B 131K ($0.04/$0.04) Tools",
+            Self::Mistral7bFree => "Mistral 7B Instruct 33K (Free) Tools",
+            Self::GeminiFlashFree => "Gemini Flash 1M (Free)",
             Self::GeminiProExp => "Gemini Pro Exp 1M (Free)",
             Self::LlamaScoutFree => "Llama Scout 512K (Free)",
             Self::LlamaMaverickFree => "Llama Maverick 256K (Free)",
@@ -172,6 +195,7 @@ impl Model {
             Self::NvidiaNemotronFree => "NVIDIA Nemotron 128K (Free)",
             Self::Qwen4bFree => "Qwen3 4B 128K (Free)",
             Self::Qwen30bFree => "Qwen3 30B 40K (Free)",
+            Self::Qwen3235b => "Qwen3 235B 128K ($0.20/$0.80)",
             Self::Custom {
                 name, display_name, ..
             } => display_name.as_deref().unwrap_or(name),
@@ -180,12 +204,15 @@ impl Model {
 
     pub fn max_token_count(&self) -> usize {
         match self {
+            Self::GeminiFlash001 => 1_000_000,
+            Self::GeminiFlashLite001 => 1_000_000,
             Self::GeminiFlashFree => 1_047_576,
             Self::GeminiProExp => 1_047_576,
             Self::QwenTurbo => 1_047_576,
-            Self::LlamaScout => 128_000,
+            Self::LlamaScout => 131_000,
+            Self::Mistral3b => 131_000,
+            Self::Mistral7bFree => 33_000,
             Self::Qwen3235b => 128_000,
-            Self::GeminiFlashThinking => 1_047_576,
             Self::LlamaScoutFree => 512_000,
             Self::LlamaMaverickFree => 256_000,
             Self::DeepseekFree => 160_000,
@@ -205,13 +232,15 @@ impl Model {
         }
     }
 
-    /// Returns whether the given model supports the `parallel_tool_calls` parameter.
-    ///
-    /// If the model does not support the parameter, do not pass it up, or the API will return an error.
     pub fn supports_parallel_tool_calls(&self) -> bool {
         matches!(
             self,
-            Self::GeminiFlashFree | Self::GeminiProExp | Self::GeminiFlashThinking
+            Self::GeminiFlash001
+                | Self::GeminiFlashLite001
+                | Self::QwenTurbo
+                | Self::LlamaScout
+                | Self::Mistral3b
+                | Self::Mistral7bFree
         )
     }
 }

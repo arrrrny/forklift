@@ -7916,6 +7916,7 @@ dependencies = [
  "partial-json-fixer",
  "project",
  "proto",
+ "regex",
  "schemars",
  "serde",
  "serde_json",
