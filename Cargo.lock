@@ -7913,6 +7913,7 @@ dependencies = [
  "menu",
  "mistral",
  "ollama",
+ "once_cell",
  "open_ai",
  "open_router",
  "partial-json-fixer",

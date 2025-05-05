@@ -11,6 +11,41 @@ use std::convert::TryFrom;
 
 pub const LITELLM_API_URL: &str = "http://localhost:4000";
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub max_tokens: Option<usize>,
+    pub max_output_tokens: Option<u32>,
+}
+
+pub async fn fetch_models(
+    client: &dyn HttpClient,
+    api_url: &str,
+    api_key: &str,
+) -> anyhow::Result<Vec<ModelInfo>> {
+    let uri = format!("{}/v1/models", api_url.trim_end_matches('/'));
+    let request = HttpRequest::builder()
+        .method(Method::GET)
+        .uri(uri)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .body(AsyncBody::empty())?;
+    let mut response = client.send(request).await?;
+    if !response.status().is_success() {
+        return Err(anyhow!("Failed to fetch models: {}", response.status()));
+    }
+    let mut body = Vec::new();
+    response.body_mut().read_to_end(&mut body).await?;
+    let json: serde_json::Value = serde_json::from_slice(&body)?;
+    let models = json["data"]
+        .as_array()
+        .ok_or_else(|| anyhow!("Invalid models response"))?
+        .iter()
+        .map(|m| serde_json::from_value(m.clone()))
+        .collect::<Result<Vec<ModelInfo>, _>>()?;
+    Ok(models)
+}
+
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {

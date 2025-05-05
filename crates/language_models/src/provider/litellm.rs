@@ -18,6 +18,8 @@ use language_model::{
     LanguageModelToolUse, RateLimiter, Role, StopReason,
 };
 
+use litellm::ModelInfo;
+use log::warn;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore};
@@ -54,6 +56,8 @@ pub struct LiteLLMLanguageModelProvider {
 pub struct State {
     api_key: Option<String>,
     api_key_from_env: bool,
+    http_client: Arc<dyn HttpClient>,
+    cached_models: Option<Vec<ModelInfo>>,
     _subscription: Subscription,
 }
 
@@ -68,6 +72,7 @@ impl State {
             .litellm
             .api_url
             .clone();
+        let client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             credentials_provider
                 .delete_credentials(&api_url, &cx)
@@ -76,6 +81,7 @@ impl State {
             this.update(cx, |this, cx| {
                 this.api_key = None;
                 this.api_key_from_env = false;
+                this.cached_models = None;
                 cx.notify();
             })
         })
@@ -87,14 +93,34 @@ impl State {
             .litellm
             .api_url
             .clone();
+        let client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             credentials_provider
                 .write_credentials(&api_url, "Bearer", api_key.as_bytes(), &cx)
                 .await?;
+            // Update credentials and clear any existing cache
             this.update(cx, |this, cx| {
-                this.api_key = Some(api_key);
+                this.api_key = Some(api_key.clone());
+                this.cached_models = None;
                 cx.notify();
-            })
+            })?;
+            // Fetch and cache models after setting API key
+
+            let models_api_url = api_url.clone();
+            let key = api_key.clone();
+            match litellm::fetch_models(&*client, &models_api_url, &key).await {
+                Ok(list) => {
+                    this.update(cx, |this, cx| {
+                        this.cached_models = Some(list);
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Err(err) => {
+                    log::warn!("LiteLLM: failed to fetch models in set_api_key: {}", err);
+                }
+            }
+            Ok(())
         })
     }
 
@@ -108,6 +134,7 @@ impl State {
             .litellm
             .api_url
             .clone();
+        let client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             let (api_key, from_env) = if let Ok(api_key) = std::env::var(LITELLM_API_KEY_VAR) {
                 (api_key, true)
@@ -122,22 +149,71 @@ impl State {
                 )
             };
 
+            // Update credentials
             this.update(cx, |this, cx| {
-                this.api_key = Some(api_key);
+                this.api_key = Some(api_key.clone());
                 this.api_key_from_env = from_env;
+                // Reset any previous cache on new auth
+                this.cached_models = None;
                 cx.notify();
             })?;
+
+            // Fetch and cache models once authenticated
+            let models_api_url = api_url.clone();
+            let key = api_key.clone();
+            match litellm::fetch_models(&*client, &models_api_url, &key).await {
+                Ok(list) => {
+                    this.update(cx, |this, cx| {
+                        this.cached_models = Some(list);
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Err(err) => {
+                    // silently ignore fetch errors
+                    log::warn!("LiteLLM: failed to fetch models: {}", err);
+                }
+            }
 
             Ok(())
         })
     }
-}
 
+    fn fetch_models(&mut self, cx: &mut Context<Self>) -> Task<Result<()>> {
+        let api_url = AllLanguageModelSettings::get_global(cx)
+            .litellm
+            .api_url
+            .clone();
+        let client = self.http_client.clone();
+        let api_key = if let Some(k) = self.api_key.clone() {
+            k
+        } else {
+            return Task::ready(Ok(()));
+        };
+        cx.spawn(async move |this, cx| {
+            match litellm::fetch_models(&*client, &api_url, &api_key).await {
+                Ok(list) => {
+                    this.update(cx, |this, cx| {
+                        this.cached_models = Some(list);
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Err(err) => {
+                    log::warn!("LiteLLM: failed to fetch models: {}", err);
+                }
+            }
+            Ok(())
+        })
+    }
+}
 impl LiteLLMLanguageModelProvider {
     pub fn new(http_client: Arc<dyn HttpClient>, cx: &mut App) -> Self {
         let state = cx.new(|cx| State {
             api_key: None,
             api_key_from_env: false,
+            http_client: http_client.clone(),
+            cached_models: None,
             _subscription: cx.observe_global::<SettingsStore>(|_this: &mut State, cx| {
                 cx.notify();
             }),
@@ -183,42 +259,21 @@ impl LanguageModelProvider for LiteLLMLanguageModelProvider {
     }
 
     fn provided_models(&self, cx: &App) -> Vec<Arc<dyn LanguageModel>> {
-        let mut models = BTreeMap::default();
-
-        // Add some example default models for LiteLLM
-        models.insert(
-            "github_copilot/gpt-3.5-turbo",
-            litellm::Model::from_id("github_copilot/gpt-3.5-turbo"),
-        );
-        models.insert(
-            "github_copilot/gpt-4o",
-            litellm::Model::from_id("github_copilot/gpt-4o"),
-        );
-        models.insert(
-            "github_copilot/claude-3.7-sonnet",
-            litellm::Model::from_id("github_copilot/claude-3.7-sonnet"),
-        );
-
-        for available_model in AllLanguageModelSettings::get_global(cx)
-            .litellm
-            .available_models
-            .iter()
-        {
-            models.insert(
-                &available_model.name,
-                litellm::Model {
-                    name: available_model.name.clone(),
-                    display_name: available_model.display_name.clone(),
-                    max_tokens: available_model.max_tokens,
-                    max_output_tokens: available_model.max_output_tokens,
-                },
-            );
+        if let Some(list) = &self.state.read(cx).cached_models {
+            list.iter()
+                .map(|info| {
+                    let model = litellm::Model {
+                        name: info.id.clone(),
+                        display_name: info.name.clone(),
+                        max_tokens: info.max_tokens.unwrap_or(0) as usize,
+                        max_output_tokens: info.max_output_tokens,
+                    };
+                    self.create_language_model(model)
+                })
+                .collect()
+        } else {
+            Vec::new()
         }
-
-        models
-            .into_values()
-            .map(|model| self.create_language_model(model))
-            .collect()
     }
 
     fn is_authenticated(&self, cx: &App) -> bool {
@@ -647,6 +702,12 @@ impl ConfigurationView {
         cx.notify();
     }
 
+    fn retry_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state
+            .update(cx, |state, cx| state.fetch_models(cx))
+            .detach_and_log_err(cx);
+    }
+
     fn render_api_key_editor(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = ThemeSettings::get_global(cx);
         let text_style = TextStyle {
@@ -681,7 +742,7 @@ impl ConfigurationView {
 }
 
 impl Render for ConfigurationView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let env_var_set = self.state.read(cx).api_key_from_env;
 
         if self.load_credentials_task.is_some() {
@@ -746,20 +807,33 @@ impl Render for ConfigurationView {
                         })),
                 )
                 .child(
-                    Button::new("reset-key", "Reset Key")
-                        .label_size(LabelSize::Small)
-                        .icon(Some(IconName::Trash))
-                        .icon_size(IconSize::Small)
-                        .icon_position(IconPosition::Start)
-                        .disabled(env_var_set)
-                        .when(env_var_set, |this| {
-                            this.tooltip(Tooltip::text(format!(
-                                "To reset your API key, unset the {} environment variable.",
-                                LITELLM_API_KEY_VAR
-                            )))
-                        })
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.reset_api_key(window, cx)),
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("fetch-models", "Fetch Models")
+                                .label_size(LabelSize::Small)
+                                .icon(Some(IconName::Play))
+                                .icon_size(IconSize::Small)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.retry_connection(window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("reset-key", "Reset Key")
+                                .label_size(LabelSize::Small)
+                                .icon(Some(IconName::Trash))
+                                .icon_size(IconSize::Small)
+                                .icon_position(IconPosition::Start)
+                                .disabled(env_var_set)
+                                .when(env_var_set, |this| {
+                                    this.tooltip(Tooltip::text(format!(
+                                        "To reset your API key, unset the {} environment variable.",
+                                        LITELLM_API_KEY_VAR
+                                    )))
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.reset_api_key(window, cx)
+                                })),
                         ),
                 )
                 .into_any()
