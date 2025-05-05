@@ -1,5 +1,5 @@
 use anyhow::{Context as _, Result, anyhow};
-use collections::{BTreeMap, HashMap};
+use collections::HashMap;
 use credentials_provider::CredentialsProvider;
 use editor::{Editor, EditorElement, EditorStyle};
 use futures::Stream;
@@ -19,7 +19,7 @@ use language_model::{
 };
 
 use litellm::ModelInfo;
-use log::warn;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore};
@@ -72,7 +72,7 @@ impl State {
             .litellm
             .api_url
             .clone();
-        let client = self.http_client.clone();
+        let _client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             credentials_provider
                 .delete_credentials(&api_url, &cx)
@@ -631,6 +631,7 @@ struct ConfigurationView {
     api_key_editor: Entity<Editor>,
     state: Entity<State>,
     load_credentials_task: Option<Task<()>>,
+    loading_models_task: Option<Task<anyhow::Result<()>>>,
 }
 
 impl ConfigurationView {
@@ -642,7 +643,7 @@ impl ConfigurationView {
             editor
         });
 
-        cx.observe(&state, |_, _, cx| {
+        cx.observe(&state, |_, _cx, cx| {
             cx.notify();
         })
         .detach();
@@ -669,7 +670,18 @@ impl ConfigurationView {
             api_key_editor,
             state,
             load_credentials_task,
+            loading_models_task: None,
         }
+    }
+
+    fn retry_fetch_models(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.clone();
+        self.loading_models_task = Some(cx.spawn(async move |_this, cx| {
+            state
+                .update(cx, |state, cx| state.fetch_models(cx))
+                .log_err();
+            Ok(())
+        }));
     }
 
     fn save_api_key(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
@@ -788,6 +800,7 @@ impl Render for ConfigurationView {
                 )
                 .into_any()
         } else {
+            let loading_models = self.loading_models_task.is_some();
             h_flex()
                 .mt_1()
                 .p_1()
@@ -814,9 +827,10 @@ impl Render for ConfigurationView {
                                 .label_size(LabelSize::Small)
                                 .icon(Some(IconName::Play))
                                 .icon_size(IconSize::Small)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.retry_connection(window, cx)
-                                })),
+                                .on_click(cx.listener(|this, _event, _window, cx| {
+                                    this.retry_fetch_models(cx)
+                                }))
+                                .disabled(loading_models),
                         )
                         .child(
                             Button::new("reset-key", "Reset Key")
@@ -836,6 +850,18 @@ impl Render for ConfigurationView {
                                 })),
                         ),
                 )
+                .when(loading_models, |this| {
+                    this.child(
+                        h_flex()
+                            .gap_1()
+                            .child(Icon::new(IconName::Spinner).color(Color::Muted))
+                            .child(
+                                Label::new("Fetching models...")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                })
                 .into_any()
         }
     }

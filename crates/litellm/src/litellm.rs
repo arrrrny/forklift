@@ -24,26 +24,116 @@ pub async fn fetch_models(
     api_url: &str,
     api_key: &str,
 ) -> anyhow::Result<Vec<ModelInfo>> {
-    let uri = format!("{}/v1/models", api_url.trim_end_matches('/'));
+    let uri = format!("{}/v1/models", LITELLM_API_URL.trim_end_matches('/'));
+    log::info!("Fetching models from: {}", uri);
+
+    // Detailed logging for HTTP request building
+    log::debug!(
+        "Building HTTP GET request to {} with headers: Authorization: Bearer {}",
+        uri,
+        api_key
+    );
     let request = HttpRequest::builder()
         .method(Method::GET)
         .uri(uri)
         .header("Authorization", format!("Bearer {}", api_key))
         .body(AsyncBody::empty())?;
-    let mut response = client.send(request).await?;
+
+    let mut response = match client.send(request).await {
+        Ok(response) => response,
+        Err(err) => {
+            log::error!("Error sending request to LiteLLM API: {}", err);
+            return Err(anyhow!("Error sending request to LiteLLM API: {}", err));
+        }
+    };
+
     if !response.status().is_success() {
-        return Err(anyhow!("Failed to fetch models: {}", response.status()));
+        let mut error_body = String::new();
+        response.body_mut().read_to_string(&mut error_body).await?;
+        log::error!(
+            "Failed to fetch models: {} - {}",
+            response.status(),
+            error_body
+        );
+        return Err(anyhow!(
+            "Failed to fetch models: {} - {}",
+            response.status(),
+            error_body
+        ));
     }
+
     let mut body = Vec::new();
     response.body_mut().read_to_end(&mut body).await?;
-    let json: serde_json::Value = serde_json::from_slice(&body)?;
-    let models = json["data"]
-        .as_array()
-        .ok_or_else(|| anyhow!("Invalid models response"))?
-        .iter()
-        .map(|m| serde_json::from_value(m.clone()))
-        .collect::<Result<Vec<ModelInfo>, _>>()?;
-    Ok(models)
+
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(json) => json,
+        Err(err) => {
+            let body_str = String::from_utf8_lossy(&body);
+            log::error!(
+                "Failed to parse JSON response: {} - Raw response: {}",
+                err,
+                body_str
+            );
+            return Err(anyhow!("Failed to parse JSON response: {}", err));
+        }
+    };
+
+    // Handle different response formats - LiteLLM should follow OpenAI format
+    // but let's be more robust
+    if let Some(data_array) = json["data"].as_array() {
+        let models = data_array
+            .iter()
+            .map(|m| {
+                let model_info = serde_json::from_value(m.clone());
+                if let Err(ref e) = model_info {
+                    log::warn!("Failed to parse model info: {} - Raw data: {:?}", e, m);
+                }
+                model_info
+            })
+            .collect::<Result<Vec<ModelInfo>, _>>()?;
+
+        log::info!(
+            "Successfully fetched {} models from LiteLLM API",
+            models.len()
+        );
+        Ok(models)
+    } else {
+        // Try an alternate format where the models might be at the root level
+        log::warn!("Standard OpenAI format not found, trying alternate format");
+
+        // If the response is directly an array of models
+        if let Some(models_array) = json.as_array() {
+            let models = models_array
+                .iter()
+                .map(|m| -> anyhow::Result<ModelInfo> {
+                    // Try to extract id from the model object
+                    let id = m["id"]
+                        .as_str()
+                        .or_else(|| m["name"].as_str())
+                        .ok_or_else(|| anyhow!("Model missing id/name"))?
+                        .to_string();
+
+                    Ok(ModelInfo {
+                        id,
+                        name: m["name"].as_str().map(|s| s.to_string()),
+                        max_tokens: m["max_tokens"].as_u64().map(|n| n as usize),
+                        max_output_tokens: m["max_output_tokens"].as_u64().map(|n| n as u32),
+                    })
+                })
+                .collect::<anyhow::Result<Vec<ModelInfo>>>()?;
+
+            log::info!(
+                "Successfully fetched {} models from alternate format",
+                models.len()
+            );
+            Ok(models)
+        } else {
+            log::error!("Invalid models response format: {:?}", json);
+            Err(anyhow!(
+                "Invalid models response format - unable to find models array"
+            ))
+        }
+    }
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -262,14 +352,21 @@ pub async fn stream_completion(
     api_key: &str,
     request: Request,
 ) -> Result<BoxStream<'static, Result<StreamResponse>>> {
-    let uri = format!("{api_url}/v1/chat/completions");
+    let uri = format!("{}/v1/chat/completions", LITELLM_API_URL.trim_end_matches('/'));
     let request_builder = HttpRequest::builder()
         .method(Method::POST)
         .uri(uri)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", api_key));
 
-    let request = request_builder.body(AsyncBody::from(serde_json::to_string(&request)?))?;
+    // Detailed logging for HTTP request building and payload
+    let body_json = serde_json::to_string(&request)?;
+    log::debug!(
+        "Building HTTP POST request to with headers: Content-Type: application/json, Authorization: Bearer {}",
+        api_key
+    );
+    log::debug!("Request payload: {}", body_json);
+    let request = request_builder.body(AsyncBody::from(body_json.clone()))?;
     let mut response = client.send(request).await?;
 
     if response.status().is_success() {
