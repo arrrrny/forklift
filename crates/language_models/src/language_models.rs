@@ -4,7 +4,6 @@ use client::{Client, UserStore};
 use fs::Fs;
 use gpui::{App, Context, Entity};
 use language_model::LanguageModelRegistry;
-use provider::deepseek::DeepSeekLanguageModelProvider;
 
 pub mod provider;
 mod settings;
@@ -14,7 +13,10 @@ use crate::provider::anthropic::AnthropicLanguageModelProvider;
 use crate::provider::bedrock::BedrockLanguageModelProvider;
 use crate::provider::cloud::CloudLanguageModelProvider;
 use crate::provider::copilot_chat::CopilotChatLanguageModelProvider;
+use provider::deepseek::DeepSeekLanguageModelProvider;
+
 use crate::provider::google::GoogleLanguageModelProvider;
+use crate::provider::litellm::LiteLLMLanguageModelProvider;
 use crate::provider::lmstudio::LmStudioLanguageModelProvider;
 use crate::provider::mistral::MistralLanguageModelProvider;
 use crate::provider::ollama::OllamaLanguageModelProvider;
@@ -76,6 +78,11 @@ fn register_language_model_providers(
 
     registry.register_provider(
         OpenRouterLanguageModelProvider::new(client.http_client(), cx),
+        cx,
+    );
+
+    registry.register_provider(
+        LiteLLMLanguageModelProvider::new(client.http_client(), cx),
         cx,
     );
 

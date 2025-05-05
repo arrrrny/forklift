@@ -87,6 +87,7 @@ members = [
     "crates/languages",
     "crates/livekit_api",
     "crates/livekit_client",
+    "crates/litellm",
     "crates/lmstudio",
     "crates/lsp",
     "crates/markdown",
@@ -295,6 +296,7 @@ language_tools = { path = "crates/language_tools" }
 languages = { path = "crates/languages" }
 livekit_api = { path = "crates/livekit_api" }
 livekit_client = { path = "crates/livekit_client" }
+litellm = { path = "crates/litellm" }
 lmstudio = { path = "crates/lmstudio" }
 lsp = { path = "crates/lsp" }
 markdown = { path = "crates/markdown" }

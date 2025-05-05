@@ -33,6 +33,7 @@ gpui_tokio.workspace = true
 http_client.workspace = true
 language_model.workspace = true
 lmstudio = { workspace = true, features = ["schemars"] }
+litellm = {workspace = true, features = ["schemars"]}
 log.workspace = true
 menu.workspace = true
 mistral = { workspace = true, features = ["schemars"] }
@@ -57,6 +58,8 @@ ui.workspace = true
 util.workspace = true
 workspace-hack.workspace = true
 zed_llm_client.workspace = true
+async-trait = "0.1"
+reqwest = { version = "0.11", features = ["json", "blocking", "rustls-tls"] }
 
 [dev-dependencies]
 editor = { workspace = true, features = ["test-support"] }

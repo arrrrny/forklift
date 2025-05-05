@@ -16,6 +16,7 @@ use crate::provider::{
     copilot_chat::CopilotChatSettings,
     deepseek::DeepSeekSettings,
     google::GoogleSettings,
+    litellm::LiteLLMSettings,
     lmstudio::LmStudioSettings,
     mistral::MistralSettings,
     ollama::OllamaSettings,
@@ -69,6 +70,7 @@ pub struct AllLanguageModelSettings {
     pub lmstudio: LmStudioSettings,
     pub deepseek: DeepSeekSettings,
     pub mistral: MistralSettings,
+    pub litellm: LiteLLMSettings,
     pub openrouter: OpenRouterSettings,
 }
 
@@ -84,6 +86,7 @@ pub struct AllLanguageModelSettingsContent {
     pub google: Option<GoogleSettingsContent>,
     pub deepseek: Option<DeepseekSettingsContent>,
     pub copilot_chat: Option<CopilotChatSettingsContent>,
+    pub litellm: Option<LiteLLMSettingsContent>,
     pub mistral: Option<MistralSettingsContent>,
     pub open_router: Option<OpenRouterSettingsContent>,
 }
@@ -187,6 +190,12 @@ pub struct OllamaSettingsContent {
 pub struct LmStudioSettingsContent {
     pub api_url: Option<String>,
     pub available_models: Option<Vec<provider::lmstudio::AvailableModel>>,
+}
+
+#[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct LiteLLMSettingsContent {
+    pub api_url: Option<String>,
+    pub available_models: Option<Vec<provider::litellm::AvailableModel>>,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]

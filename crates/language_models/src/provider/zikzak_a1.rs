@@ -1,4 +1,3 @@
-```rs
 // use std::sync::Arc;
 // use anyhow::{Result, anyhow};
 // use futures::{BoxFuture, Stream, StreamExt};
