@@ -89,10 +89,12 @@ pub(crate) fn handle_msg(
         WM_KEYDOWN => handle_keydown_msg(wparam, lparam, state_ptr),
         WM_KEYUP => handle_keyup_msg(wparam, state_ptr),
         WM_CHAR => handle_char_msg(wparam, lparam, state_ptr),
+        WM_DEADCHAR => handle_dead_char_msg(wparam, state_ptr),
         WM_IME_STARTCOMPOSITION => handle_ime_position(handle, state_ptr),
         WM_IME_COMPOSITION => handle_ime_composition(handle, lparam, state_ptr),
         WM_SETCURSOR => handle_set_cursor(lparam, state_ptr),
         WM_SETTINGCHANGE => handle_system_settings_changed(handle, lparam, state_ptr),
+        WM_INPUTLANGCHANGE => handle_input_language_changed(lparam, state_ptr),
         WM_GPUI_CURSOR_STYLE_CHANGED => handle_cursor_changed(lparam, state_ptr),
         _ => None,
     };
@@ -509,6 +511,14 @@ fn handle_char_msg(
     });
 
     Some(0)
+}
+
+fn handle_dead_char_msg(wparam: WPARAM, state_ptr: Rc<WindowsWindowStatePtr>) -> Option<isize> {
+    let ch = char::from_u32(wparam.0 as u32)?.to_string();
+    with_input_handler(&state_ptr, |input_handler| {
+        input_handler.replace_and_mark_text_in_range(None, &ch, None);
+    });
+    None
 }
 
 fn handle_mouse_down_msg(
@@ -1276,6 +1286,18 @@ fn handle_system_theme_changed(
     callback();
     state_ptr.state.borrow_mut().callbacks.appearance_changed = Some(callback);
     configure_dwm_dark_mode(handle);
+    Some(0)
+}
+
+fn handle_input_language_changed(
+    lparam: LPARAM,
+    state_ptr: Rc<WindowsWindowStatePtr>,
+) -> Option<isize> {
+    let thread = state_ptr.main_thread_id_win32;
+    let validation = state_ptr.validation_number;
+    unsafe {
+        PostThreadMessageW(thread, WM_INPUTLANGCHANGE, WPARAM(validation), lparam).log_err();
+    }
     Some(0)
 }
 
