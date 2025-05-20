@@ -8791,6 +8791,7 @@ dependencies = [
  "gpui_tokio",
  "http_client",
  "language_model",
+ "litellm",
  "lmstudio",
  "log",
  "menu",
@@ -9134,6 +9135,20 @@ name = "linux-raw-sys"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd945864f07fe9f5371a27ad7b52a172b4b499999f1d97574c9fa68373937e12"
+
+[[package]]
+name = "litellm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures 0.3.31",
+ "http_client",
+ "log",
+ "schemars",
+ "serde",
+ "serde_json",
+ "workspace-hack",
+]
 
 [[package]]
 name = "litemap"
