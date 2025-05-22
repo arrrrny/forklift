@@ -7,7 +7,10 @@ pub mod variable_list;
 
 use std::{any::Any, ops::ControlFlow, path::PathBuf, sync::Arc, time::Duration};
 
-use crate::persistence::{self, DebuggerPaneItem, SerializedLayout};
+use crate::{
+    new_session_modal::resolve_path,
+    persistence::{self, DebuggerPaneItem, SerializedLayout},
+};
 
 use super::DebugPanelItemEvent;
 use anyhow::{Context as _, Result, anyhow};
@@ -15,7 +18,7 @@ use breakpoint_list::BreakpointList;
 use collections::{HashMap, IndexMap};
 use console::Console;
 use dap::{
-    Capabilities, RunInTerminalRequestArguments, Thread,
+    Capabilities, DapRegistry, RunInTerminalRequestArguments, Thread,
     adapters::{DebugAdapterName, DebugTaskDefinition},
     client::SessionId,
     debugger_settings::DebuggerSettings,
@@ -38,8 +41,8 @@ use serde_json::Value;
 use settings::Settings;
 use stack_frame_list::StackFrameList;
 use task::{
-    BuildTaskDefinition, DebugScenario, LaunchRequest, ShellBuilder, SpawnInTerminal, TaskContext,
-    substitute_variables_in_map, substitute_variables_in_str,
+    BuildTaskDefinition, DebugScenario, ShellBuilder, SpawnInTerminal, TaskContext, ZedDebugConfig,
+    substitute_variables_in_str,
 };
 use terminal_view::TerminalView;
 use ui::{
@@ -519,6 +522,56 @@ impl Focusable for DebugTerminal {
 }
 
 impl RunningState {
+    // todo(debugger) move this to util and make it so you pass a closure to it that converts a string
+    pub(crate) fn substitute_variables_in_config(
+        config: &mut serde_json::Value,
+        context: &TaskContext,
+    ) {
+        match config {
+            serde_json::Value::Object(obj) => {
+                obj.values_mut()
+                    .for_each(|value| Self::substitute_variables_in_config(value, context));
+            }
+            serde_json::Value::Array(array) => {
+                array
+                    .iter_mut()
+                    .for_each(|value| Self::substitute_variables_in_config(value, context));
+            }
+            serde_json::Value::String(s) => {
+                if let Some(substituted) = substitute_variables_in_str(&s, context) {
+                    *s = substituted;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn relativlize_paths(
+        key: Option<&str>,
+        config: &mut serde_json::Value,
+        context: &TaskContext,
+    ) {
+        match config {
+            serde_json::Value::Object(obj) => {
+                obj.iter_mut()
+                    .for_each(|(key, value)| Self::relativlize_paths(Some(key), value, context));
+            }
+            serde_json::Value::Array(array) => {
+                array
+                    .iter_mut()
+                    .for_each(|value| Self::relativlize_paths(None, value, context));
+            }
+            serde_json::Value::String(s) if key == Some("program") || key == Some("cwd") => {
+                resolve_path(s);
+
+                if let Some(substituted) = substitute_variables_in_str(&s, context) {
+                    *s = substituted;
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn new(
         session: Entity<Session>,
         project: Entity<Project>,
@@ -561,14 +614,25 @@ impl RunningState {
             cx.subscribe_in(&session, window, |this, _, event, window, cx| {
                 match event {
                     SessionEvent::Stopped(thread_id) => {
-                        this.workspace
+                        let panel = this
+                            .workspace
                             .update(cx, |workspace, cx| {
                                 workspace.open_panel::<crate::DebugPanel>(window, cx);
+                                workspace.panel::<crate::DebugPanel>(cx)
                             })
-                            .log_err();
+                            .log_err()
+                            .flatten();
 
                         if let Some(thread_id) = thread_id {
                             this.select_thread(*thread_id, window, cx);
+                        }
+                        if let Some(panel) = panel {
+                            let id = this.session_id;
+                            window.defer(cx, move |window, cx| {
+                                panel.update(cx, |this, cx| {
+                                    this.activate_session_by_id(id, window, cx);
+                                })
+                            })
                         }
                     }
                     SessionEvent::Threads => {
@@ -704,6 +768,7 @@ impl RunningState {
         };
         let project = workspace.read(cx).project().clone();
         let dap_store = project.read(cx).dap_store().downgrade();
+        let dap_registry = cx.global::<DapRegistry>().clone();
         let task_store = project.read(cx).task_store().downgrade();
         let weak_project = project.downgrade();
         let weak_workspace = workspace.downgrade();
@@ -713,11 +778,19 @@ impl RunningState {
                 adapter,
                 label,
                 build,
-                request,
-                initialize_args,
+                mut config,
                 tcp_connection,
-                stop_on_entry,
             } = scenario;
+            Self::relativlize_paths(None, &mut config, &task_context);
+            Self::substitute_variables_in_config(&mut config, &task_context);
+
+            let request_type = dap_registry
+                .adapter(&adapter)
+                .ok_or_else(|| anyhow!("{}: is not a valid adapter name", &adapter))
+                .and_then(|adapter| adapter.validate_config(&config));
+
+            let config_is_valid = request_type.is_ok();
+
             let build_output = if let Some(build) = build {
                 let (task, locator_name) = match build {
                     BuildTaskDefinition::Template {
@@ -746,9 +819,9 @@ impl RunningState {
                 };
 
                 let locator_name = if let Some(locator_name) = locator_name {
-                    debug_assert!(request.is_none());
+                    debug_assert!(!config_is_valid);
                     Some(locator_name)
-                } else if request.is_none() {
+                } else if !config_is_valid {
                     dap_store
                         .update(cx, |this, cx| {
                             this.debug_scenario_for_build_task(
@@ -825,63 +898,44 @@ impl RunningState {
             } else {
                 None
             };
-            let request = if let Some(request) = request {
-                request
+
+            if config_is_valid {
+                // Ok(DebugTaskDefinition {
+                //     label,
+                //     adapter: DebugAdapterName(adapter),
+                //     config,
+                //     tcp_connection,
+                // })
             } else if let Some((task, locator_name)) = build_output {
                 let locator_name =
                     locator_name.context("Could not find a valid locator for a build task")?;
-                dap_store
+                let request = dap_store
                     .update(cx, |this, cx| {
                         this.run_debug_locator(&locator_name, task, cx)
                     })?
-                    .await?
+                    .await?;
+
+                let zed_config = ZedDebugConfig {
+                    label: label.clone(),
+                    adapter: adapter.clone(),
+                    request,
+                    stop_on_entry: None,
+                };
+
+                let scenario = dap_registry
+                    .adapter(&adapter)
+                    .ok_or_else(|| anyhow!("{}: is not a valid adapter name", &adapter))
+                    .map(|adapter| adapter.config_from_zed_format(zed_config))??;
+                config = scenario.config;
+                Self::substitute_variables_in_config(&mut config, &task_context);
             } else {
                 anyhow::bail!("No request or build provided");
             };
-            let request = match request {
-                dap::DebugRequest::Launch(launch_request) => {
-                    let cwd = match launch_request.cwd.as_deref().and_then(|path| path.to_str()) {
-                        Some(cwd) => {
-                            let substituted_cwd = substitute_variables_in_str(&cwd, &task_context)
-                                .context("substituting variables in cwd")?;
-                            Some(PathBuf::from(substituted_cwd))
-                        }
-                        None => None,
-                    };
 
-                    let env = substitute_variables_in_map(
-                        &launch_request.env.into_iter().collect(),
-                        &task_context,
-                    )
-                    .context("substituting variables in env")?
-                    .into_iter()
-                    .collect();
-                    let new_launch_request = LaunchRequest {
-                        program: substitute_variables_in_str(
-                            &launch_request.program,
-                            &task_context,
-                        )
-                        .context("substituting variables in program")?,
-                        args: launch_request
-                            .args
-                            .into_iter()
-                            .map(|arg| substitute_variables_in_str(&arg, &task_context))
-                            .collect::<Option<Vec<_>>>()
-                            .context("substituting variables in args")?,
-                        cwd,
-                        env,
-                    };
-
-                    dap::DebugRequest::Launch(new_launch_request)
-                }
-                request @ dap::DebugRequest::Attach(_) => request, // todo(debugger): We should check that process_id is valid and if not show the modal
-            };
             Ok(DebugTaskDefinition {
                 label,
                 adapter: DebugAdapterName(adapter),
-                request,
-                initialize_args,
-                stop_on_entry,
+                config,
                 tcp_connection,
             })
         })

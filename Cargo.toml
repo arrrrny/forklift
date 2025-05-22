@@ -86,6 +86,7 @@ members = [
     "crates/languages",
     "crates/livekit_api",
     "crates/livekit_client",
+    "crates/litellm",
     "crates/lmstudio",
     "crates/lsp",
     "crates/markdown",
@@ -293,6 +294,7 @@ language_tools = { path = "crates/language_tools" }
 languages = { path = "crates/languages" }
 livekit_api = { path = "crates/livekit_api" }
 livekit_client = { path = "crates/livekit_client" }
+litellm = { path = "crates/litellm" }
 lmstudio = { path = "crates/lmstudio" }
 lsp = { path = "crates/lsp" }
 markdown = { path = "crates/markdown" }
@@ -464,6 +466,7 @@ indoc = "2"
 inventory = "0.3.19"
 itertools = "0.14.0"
 jj-lib = { git = "https://github.com/jj-vcs/jj", rev = "e18eb8e05efaa153fad5ef46576af145bba1807f" }
+json_dotpath = "1.1"
 jsonschema = "0.30.0"
 jsonwebtoken = "9.3"
 jupyter-protocol = { git = "https://github.com/ConradIrwin/runtimed", rev = "7130c804216b6914355d15d0b91ea91f6babd734" }

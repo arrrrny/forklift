@@ -15,11 +15,13 @@ use crate::provider::bedrock::BedrockLanguageModelProvider;
 use crate::provider::cloud::CloudLanguageModelProvider;
 use crate::provider::copilot_chat::CopilotChatLanguageModelProvider;
 use crate::provider::google::GoogleLanguageModelProvider;
+use crate::provider::litellm::LiteLLMLanguageModelProvider;
 use crate::provider::lmstudio::LmStudioLanguageModelProvider;
 use crate::provider::mistral::MistralLanguageModelProvider;
 use crate::provider::ollama::OllamaLanguageModelProvider;
 use crate::provider::open_ai::OpenAiLanguageModelProvider;
 use crate::provider::open_router::OpenRouterLanguageModelProvider;
+
 pub use crate::settings::*;
 
 pub fn init(user_store: Entity<UserStore>, client: Arc<Client>, fs: Arc<dyn Fs>, cx: &mut App) {
@@ -78,4 +80,9 @@ fn register_language_model_providers(
         cx,
     );
     registry.register_provider(CopilotChatLanguageModelProvider::new(cx), cx);
+
+    registry.register_provider(
+        LiteLLMLanguageModelProvider::new(client.http_client(), cx),
+        cx,
+    );
 }
