@@ -12,6 +12,7 @@ use language_model::{CloudModel, LanguageModel};
 use lmstudio::Model as LmStudioModel;
 use mistral::Model as MistralModel;
 use ollama::Model as OllamaModel;
+use open_router::Model as OpenRouterModel;
 use schemars::{JsonSchema, schema::Schema};
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsSources};
@@ -75,6 +76,11 @@ pub enum AssistantProviderContentV1 {
     #[serde(rename = "mistral")]
     Mistral {
         default_model: Option<MistralModel>,
+        api_url: Option<String>,
+    },
+    #[serde(rename = "openrouter")]
+    OpenRouter {
+        default_model: Option<OpenRouterModel>,
         api_url: Option<String>,
     },
 }
@@ -261,6 +267,12 @@ impl AssistantSettingsContent {
                                     model: model.id().to_string(),
                                 })
                             }
+                            AssistantProviderContentV1::OpenRouter { default_model, .. } => {
+                                default_model.map(|model| LanguageModelSelection {
+                                    provider: "openrouter".into(),
+                                    model: model.id().to_string(),
+                                })
+                            }
                         }),
                     inline_assistant_model: None,
                     commit_message_model: None,
@@ -411,6 +423,18 @@ impl AssistantSettingsContent {
                             };
                             settings.provider = Some(AssistantProviderContentV1::DeepSeek {
                                 default_model: DeepseekModel::from_id(&model).ok(),
+                                api_url,
+                            });
+                        }
+                        "openrouter" => {
+                            let api_url = match &settings.provider {
+                                Some(AssistantProviderContentV1::OpenRouter { api_url, .. }) => {
+                                    api_url.clone()
+                                }
+                                _ => None,
+                            };
+                            settings.provider = Some(AssistantProviderContentV1::OpenRouter {
+                                default_model: OpenRouterModel::from_id(&model).ok(),
                                 api_url,
                             });
                         }
@@ -712,6 +736,7 @@ impl JsonSchema for LanguageModelProviderSetting {
                 "zed.dev".into(),
                 "copilot_chat".into(),
                 "deepseek".into(),
+                "openrouter".into(),
                 "mistral".into(),
             ]),
             ..Default::default()
