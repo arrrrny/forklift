@@ -82,6 +82,15 @@ impl Model {
         }
     }
 
+    pub fn from_id(id: &str) -> Self {
+        Self {
+            name: id.to_owned(),
+            display_name: None,
+            max_tokens: 2000000,
+            supports_tools: None,
+        }
+    }
+
     pub fn id(&self) -> &str {
         &self.name
     }

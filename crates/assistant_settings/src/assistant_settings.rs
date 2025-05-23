@@ -9,6 +9,7 @@ use collections::IndexMap;
 use deepseek::Model as DeepseekModel;
 use gpui::{App, Pixels, SharedString};
 use language_model::{CloudModel, LanguageModel};
+use litellm::Model as LiteLLMModel;
 use lmstudio::Model as LmStudioModel;
 use mistral::Model as MistralModel;
 use ollama::Model as OllamaModel;
@@ -81,6 +82,11 @@ pub enum AssistantProviderContentV1 {
     #[serde(rename = "openrouter")]
     OpenRouter {
         default_model: Option<OpenRouterModel>,
+        api_url: Option<String>,
+    },
+    #[serde(rename = "litellm")]
+    LiteLLM {
+        default_model: Option<LiteLLMModel>,
         api_url: Option<String>,
     },
 }
@@ -273,6 +279,12 @@ impl AssistantSettingsContent {
                                     model: model.id().to_string(),
                                 })
                             }
+                            AssistantProviderContentV1::LiteLLM { default_model, .. } => {
+                                default_model.map(|model| LanguageModelSelection {
+                                    provider: "litellm".into(),
+                                    model: model.id().to_string(),
+                                })
+                            }
                         }),
                     inline_assistant_model: None,
                     commit_message_model: None,
@@ -428,13 +440,25 @@ impl AssistantSettingsContent {
                         }
                         "openrouter" => {
                             let api_url = match &settings.provider {
-                                Some(AssistantProviderContentV1::OpenRouter { api_url, .. }) => {
+                                Some(AssistantProviderContentV1::OpenRouter {
+                                    api_url, ..
+                                }) => api_url.clone(),
+                                _ => None,
+                            };
+                            settings.provider = Some(AssistantProviderContentV1::OpenRouter {
+                                default_model: Some(OpenRouterModel::from_id(&model)),
+                                api_url,
+                            });
+                        }
+                        "litellm" => {
+                            let api_url = match &settings.provider {
+                                Some(AssistantProviderContentV1::LiteLLM { api_url, .. }) => {
                                     api_url.clone()
                                 }
                                 _ => None,
                             };
-                            settings.provider = Some(AssistantProviderContentV1::OpenRouter {
-                                default_model: OpenRouterModel::from_id(&model).ok(),
+                            settings.provider = Some(AssistantProviderContentV1::LiteLLM {
+                                default_model: Some(litellm::Model::from_id(&model)),
                                 api_url,
                             });
                         }
@@ -738,6 +762,8 @@ impl JsonSchema for LanguageModelProviderSetting {
                 "deepseek".into(),
                 "openrouter".into(),
                 "mistral".into(),
+                "litellm".into(),
+                "litellm".into(),
             ]),
             ..Default::default()
         }

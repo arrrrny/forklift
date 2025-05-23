@@ -1,22 +1,26 @@
 use anyhow::{Context as _, Result, anyhow};
-use collections::BTreeMap;
+use collections::{BTreeMap, HashMap};
 use credentials_provider::CredentialsProvider;
+use deepseek::{ImageUrl, Model, ResponseStreamEvent, stream_completion};
 use editor::{Editor, EditorElement, EditorStyle};
-use futures::{FutureExt, StreamExt, future::BoxFuture, stream::BoxStream};
+use futures::Stream;
+use futures::{FutureExt, StreamExt, future::BoxFuture};
 use gpui::{
-    AnyView, AppContext as _, AsyncApp, Entity, FontStyle, Subscription, Task, TextStyle,
-    WhiteSpace,
+    AnyView, App, AsyncApp, Context, Entity, FontStyle, Subscription, Task, TextStyle, WhiteSpace,
 };
 use http_client::HttpClient;
 use language_model::{
     AuthenticateError, LanguageModel, LanguageModelCompletionError, LanguageModelCompletionEvent,
     LanguageModelId, LanguageModelName, LanguageModelProvider, LanguageModelProviderId,
     LanguageModelProviderName, LanguageModelProviderState, LanguageModelRequest,
-    LanguageModelToolChoice, RateLimiter, Role,
+    LanguageModelToolChoice, LanguageModelToolResultContent, LanguageModelToolUse, MessageContent,
+    RateLimiter, Role, StopReason, WrappedTextContent,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore};
+use std::pin::Pin;
+use std::str::FromStr as _;
 use std::sync::Arc;
 use theme::ThemeSettings;
 use ui::{Icon, IconName, List, prelude::*};
@@ -26,7 +30,6 @@ use crate::{AllLanguageModelSettings, ui::InstructionListItem};
 
 const PROVIDER_ID: &str = "deepseek";
 const PROVIDER_NAME: &str = "DeepSeek";
-const DEEPSEEK_API_KEY_VAR: &str = "DEEPSEEK_API_KEY";
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct DeepSeekSettings {
@@ -40,11 +43,12 @@ pub struct AvailableModel {
     pub display_name: Option<String>,
     pub max_tokens: usize,
     pub max_output_tokens: Option<u32>,
+    pub max_completion_tokens: Option<u32>,
 }
 
 pub struct DeepSeekLanguageModelProvider {
     http_client: Arc<dyn HttpClient>,
-    state: Entity<State>,
+    state: gpui::Entity<State>,
 }
 
 pub struct State {
@@ -52,6 +56,8 @@ pub struct State {
     api_key_from_env: bool,
     _subscription: Subscription,
 }
+
+const DEEPSEEK_API_KEY_VAR: &str = "DEEPSEEK_API_KEY";
 
 impl State {
     fn is_authenticated(&self) -> bool {
@@ -86,7 +92,8 @@ impl State {
         cx.spawn(async move |this, cx| {
             credentials_provider
                 .write_credentials(&api_url, "Bearer", api_key.as_bytes(), &cx)
-                .await?;
+                .await
+                .log_err();
             this.update(cx, |this, cx| {
                 this.api_key = Some(api_key);
                 cx.notify();
@@ -117,7 +124,6 @@ impl State {
                     false,
                 )
             };
-
             this.update(cx, |this, cx| {
                 this.api_key = Some(api_key);
                 this.api_key_from_env = from_env;
@@ -149,14 +155,14 @@ impl DeepSeekLanguageModelProvider {
             state: self.state.clone(),
             http_client: self.http_client.clone(),
             request_limiter: RateLimiter::new(4),
-        }) as Arc<dyn LanguageModel>
+        })
     }
 }
 
 impl LanguageModelProviderState for DeepSeekLanguageModelProvider {
     type ObservableEntity = State;
 
-    fn observable_entity(&self) -> Option<Entity<Self::ObservableEntity>> {
+    fn observable_entity(&self) -> Option<gpui::Entity<Self::ObservableEntity>> {
         Some(self.state.clone())
     }
 }
@@ -175,7 +181,7 @@ impl LanguageModelProvider for DeepSeekLanguageModelProvider {
     }
 
     fn default_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
-        Some(self.create_language_model(deepseek::Model::default()))
+        Some(self.create_language_model(deepseek::Model::Chat))
     }
 
     fn default_fast_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
@@ -231,7 +237,7 @@ impl LanguageModelProvider for DeepSeekLanguageModelProvider {
 pub struct DeepSeekLanguageModel {
     id: LanguageModelId,
     model: deepseek::Model,
-    state: Entity<State>,
+    state: gpui::Entity<State>,
     http_client: Arc<dyn HttpClient>,
     request_limiter: RateLimiter,
 }
@@ -241,7 +247,8 @@ impl DeepSeekLanguageModel {
         &self,
         request: deepseek::Request,
         cx: &AsyncApp,
-    ) -> BoxFuture<'static, Result<BoxStream<'static, Result<deepseek::StreamResponse>>>> {
+    ) -> BoxFuture<'static, Result<futures::stream::BoxStream<'static, Result<ResponseStreamEvent>>>>
+    {
         let http_client = self.http_client.clone();
         let Ok((api_key, api_url)) = cx.read_entity(&self.state, |state, cx| {
             let settings = &AllLanguageModelSettings::get_global(cx).deepseek;
@@ -252,8 +259,7 @@ impl DeepSeekLanguageModel {
 
         let future = self.request_limiter.stream(async move {
             let api_key = api_key.context("Missing DeepSeek API Key")?;
-            let request =
-                deepseek::stream_completion(http_client.as_ref(), &api_url, &api_key, request);
+            let request = stream_completion(http_client.as_ref(), &api_url, &api_key, request);
             let response = request.await?;
             Ok(response)
         });
@@ -280,15 +286,23 @@ impl LanguageModel for DeepSeekLanguageModel {
     }
 
     fn supports_tools(&self) -> bool {
-        false
-    }
-
-    fn supports_tool_choice(&self, _choice: LanguageModelToolChoice) -> bool {
-        false
+        match self.model {
+            Model::Chat => true,
+            Model::Reasoner => false,
+            Model::Custom { .. } => true,
+        }
     }
 
     fn supports_images(&self) -> bool {
         false
+    }
+
+    fn supports_tool_choice(&self, choice: LanguageModelToolChoice) -> bool {
+        match choice {
+            LanguageModelToolChoice::Auto => true,
+            LanguageModelToolChoice::Any => true,
+            LanguageModelToolChoice::None => true,
+        }
     }
 
     fn telemetry_id(&self) -> String {
@@ -308,25 +322,7 @@ impl LanguageModel for DeepSeekLanguageModel {
         request: LanguageModelRequest,
         cx: &App,
     ) -> BoxFuture<'static, Result<usize>> {
-        cx.background_spawn(async move {
-            let messages = request
-                .messages
-                .into_iter()
-                .map(|message| tiktoken_rs::ChatCompletionRequestMessage {
-                    role: match message.role {
-                        Role::User => "user".into(),
-                        Role::Assistant => "assistant".into(),
-                        Role::System => "system".into(),
-                    },
-                    content: Some(message.string_contents()),
-                    name: None,
-                    function_call: None,
-                })
-                .collect::<Vec<_>>();
-
-            tiktoken_rs::num_tokens_from_messages("gpt-4", &messages)
-        })
-        .boxed()
+        count_deepseek_tokens(request, self.model.clone(), cx)
     }
 
     fn stream_completion(
@@ -336,38 +332,17 @@ impl LanguageModel for DeepSeekLanguageModel {
     ) -> BoxFuture<
         'static,
         Result<
-            BoxStream<'static, Result<LanguageModelCompletionEvent, LanguageModelCompletionError>>,
+            futures::stream::BoxStream<
+                'static,
+                Result<LanguageModelCompletionEvent, LanguageModelCompletionError>,
+            >,
         >,
     > {
-        let request = into_deepseek(
-            request,
-            self.model.id().to_string(),
-            self.max_output_tokens(),
-        );
-        let stream = self.stream_completion(request, cx);
-
+        let request = into_deepseek(request, &self.model, self.max_output_tokens());
+        let completions = self.stream_completion(request, cx);
         async move {
-            let stream = stream.await?;
-            Ok(stream
-                .map(|result| {
-                    result
-                        .and_then(|response| {
-                            response
-                                .choices
-                                .first()
-                                .context("Empty response")
-                                .map(|choice| {
-                                    choice
-                                        .delta
-                                        .content
-                                        .clone()
-                                        .unwrap_or_default()
-                                        .map(LanguageModelCompletionEvent::Text)
-                                })
-                        })
-                        .map_err(LanguageModelCompletionError::Other)
-                })
-                .boxed())
+            let mapper = DeepSeekEventMapper::new();
+            Ok(mapper.map_stream(completions.await?).boxed())
         }
         .boxed()
     }
@@ -375,77 +350,99 @@ impl LanguageModel for DeepSeekLanguageModel {
 
 pub fn into_deepseek(
     request: LanguageModelRequest,
-    model: String,
+    model: &Model,
     max_output_tokens: Option<u32>,
 ) -> deepseek::Request {
-    let is_reasoner = model == "deepseek-reasoner";
+    let mut messages = Vec::new();
+    for message in request.messages {
+        for content in message.content {
+            match content {
+                MessageContent::Text(text) | MessageContent::Thinking { text, .. } => {
+                    add_message_content_part(
+                        deepseek::MessagePart::Text { text: text },
+                        message.role,
+                        &mut messages,
+                    )
+                }
+                MessageContent::RedactedThinking(_) => {}
+                MessageContent::Image(image) => {
+                    add_message_content_part(
+                        deepseek::MessagePart::Image {
+                            image_url: ImageUrl {
+                                url: image.to_base64_url(),
+                                detail: None,
+                            },
+                        },
+                        message.role,
+                        &mut messages,
+                    );
+                }
+                MessageContent::ToolUse(tool_use) => {
+                    let tool_call = deepseek::ToolCall {
+                        id: tool_use.id.to_string(),
+                        content: deepseek::ToolCallContent::Function {
+                            function: deepseek::FunctionContent {
+                                name: tool_use.name.to_string(),
+                                arguments: serde_json::to_string(&tool_use.input)
+                                    .unwrap_or_default(),
+                            },
+                        },
+                    };
 
-    let len = request.messages.len();
-    let merged_messages =
-        request
-            .messages
-            .into_iter()
-            .fold(Vec::with_capacity(len), |mut acc, msg| {
-                let role = msg.role;
-                let content = msg.string_contents();
-
-                if is_reasoner {
-                    if let Some(last_msg) = acc.last_mut() {
-                        match (last_msg, role) {
-                            (deepseek::RequestMessage::User { content: last }, Role::User) => {
-                                last.push(' ');
-                                last.push_str(&content);
-                                return acc;
-                            }
-
-                            (
-                                deepseek::RequestMessage::Assistant {
-                                    content: last_content,
-                                    ..
-                                },
-                                Role::Assistant,
-                            ) => {
-                                *last_content = last_content
-                                    .take()
-                                    .map(|c| {
-                                        let mut s =
-                                            String::with_capacity(c.len() + content.len() + 1);
-                                        s.push_str(&c);
-                                        s.push(' ');
-                                        s.push_str(&content);
-                                        s
-                                    })
-                                    .or(Some(content));
-
-                                return acc;
-                            }
-                            _ => {}
-                        }
+                    if let Some(deepseek::RequestMessage::Assistant { tool_calls, .. }) =
+                        messages.last_mut()
+                    {
+                        tool_calls.push(tool_call);
+                    } else {
+                        messages.push(deepseek::RequestMessage::Assistant {
+                            content: deepseek::MessageContent::empty(),
+                            tool_calls: vec![tool_call],
+                        });
                     }
                 }
+                MessageContent::ToolResult(tool_result) => {
+                    let content = match &tool_result.content {
+                        LanguageModelToolResultContent::Text(text)
+                        | LanguageModelToolResultContent::WrappedText(WrappedTextContent {
+                            text,
+                            ..
+                        }) => {
+                            vec![deepseek::MessagePart::Text {
+                                text: text.to_string(),
+                            }]
+                        }
+                        LanguageModelToolResultContent::Image(image) => {
+                            vec![deepseek::MessagePart::Image {
+                                image_url: ImageUrl {
+                                    url: image.to_base64_url(),
+                                    detail: None,
+                                },
+                            }]
+                        }
+                    };
 
-                acc.push(match role {
-                    Role::User => deepseek::RequestMessage::User { content },
-                    Role::Assistant => deepseek::RequestMessage::Assistant {
-                        content: Some(content),
-                        tool_calls: Vec::new(),
-                    },
-                    Role::System => deepseek::RequestMessage::System { content },
-                });
-                acc
-            });
+                    messages.push(deepseek::RequestMessage::Tool {
+                        content: content.into(),
+                        tool_call_id: tool_result.tool_use_id.to_string(),
+                    });
+                }
+            }
+        }
+    }
 
     deepseek::Request {
-        model,
-        messages: merged_messages,
+        model: model.id().into(),
+        messages,
         stream: true,
+        stop: request.stop,
+        temperature: 0.2,
         max_tokens: max_output_tokens,
-        temperature: if is_reasoner {
-            None
+        parallel_tool_calls: if model.supports_parallel_tool_calls() && !request.tools.is_empty() {
+            // Disable parallel tool calls, as the Agent currently expects a maximum of one per turn.
+            Some(false)
         } else {
-            request.temperature
+            None
         },
-        response_format: None,
         tools: request
             .tools
             .into_iter()
@@ -457,7 +454,170 @@ pub fn into_deepseek(
                 },
             })
             .collect(),
+        tool_choice: request.tool_choice.map(|choice| match choice {
+            LanguageModelToolChoice::Auto => deepseek::ToolChoice::Auto,
+            LanguageModelToolChoice::Any => deepseek::ToolChoice::Required,
+            LanguageModelToolChoice::None => deepseek::ToolChoice::None,
+        }),
     }
+}
+
+fn add_message_content_part(
+    new_part: deepseek::MessagePart,
+    role: Role,
+    messages: &mut Vec<deepseek::RequestMessage>,
+) {
+    match (role, messages.last_mut()) {
+        (Role::User, Some(deepseek::RequestMessage::User { content }))
+        | (Role::Assistant, Some(deepseek::RequestMessage::Assistant { content, .. }))
+        | (Role::System, Some(deepseek::RequestMessage::System { content, .. })) => {
+            content.push_part(new_part);
+        }
+        _ => {
+            messages.push(match role {
+                Role::User => deepseek::RequestMessage::User {
+                    content: deepseek::MessageContent::from(vec![new_part]),
+                },
+                Role::Assistant => deepseek::RequestMessage::Assistant {
+                    content: deepseek::MessageContent::from(vec![new_part]),
+                    tool_calls: Vec::new(),
+                },
+                Role::System => deepseek::RequestMessage::System {
+                    content: deepseek::MessageContent::from(vec![new_part]),
+                },
+            });
+        }
+    }
+}
+
+pub struct DeepSeekEventMapper {
+    tool_calls_by_index: HashMap<usize, RawToolCall>,
+}
+
+impl DeepSeekEventMapper {
+    pub fn new() -> Self {
+        Self {
+            tool_calls_by_index: HashMap::default(),
+        }
+    }
+
+    pub fn map_stream(
+        mut self,
+        events: Pin<Box<dyn Send + Stream<Item = Result<ResponseStreamEvent>>>>,
+    ) -> impl Stream<Item = Result<LanguageModelCompletionEvent, LanguageModelCompletionError>>
+    {
+        events.flat_map(move |event| {
+            futures::stream::iter(match event {
+                Ok(event) => self.map_event(event),
+                Err(error) => vec![Err(LanguageModelCompletionError::Other(anyhow!(error)))],
+            })
+        })
+    }
+
+    pub fn map_event(
+        &mut self,
+        event: ResponseStreamEvent,
+    ) -> Vec<Result<LanguageModelCompletionEvent, LanguageModelCompletionError>> {
+        let Some(choice) = event.choices.first() else {
+            return vec![Err(LanguageModelCompletionError::Other(anyhow!(
+                "Response contained no choices"
+            )))];
+        };
+
+        let mut events = Vec::new();
+        if let Some(content) = choice.delta.content.clone() {
+            events.push(Ok(LanguageModelCompletionEvent::Text(content)));
+        }
+
+        if let Some(tool_calls) = choice.delta.tool_calls.as_ref() {
+            for tool_call in tool_calls {
+                let entry = self.tool_calls_by_index.entry(tool_call.index).or_default();
+
+                if let Some(tool_id) = tool_call.id.clone() {
+                    entry.id = tool_id;
+                }
+
+                if let Some(function) = tool_call.function.as_ref() {
+                    if let Some(name) = function.name.clone() {
+                        entry.name = name;
+                    }
+
+                    if let Some(arguments) = function.arguments.clone() {
+                        entry.arguments.push_str(&arguments);
+                    }
+                }
+            }
+        }
+
+        match choice.finish_reason.as_deref() {
+            Some("stop") => {
+                events.push(Ok(LanguageModelCompletionEvent::Stop(StopReason::EndTurn)));
+            }
+            Some("tool_calls") => {
+                events.extend(self.tool_calls_by_index.drain().map(|(_, tool_call)| {
+                    match serde_json::Value::from_str(&tool_call.arguments) {
+                        Ok(input) => Ok(LanguageModelCompletionEvent::ToolUse(
+                            LanguageModelToolUse {
+                                id: tool_call.id.clone().into(),
+                                name: tool_call.name.as_str().into(),
+                                is_input_complete: true,
+                                input,
+                                raw_input: tool_call.arguments.clone(),
+                            },
+                        )),
+                        Err(error) => Err(LanguageModelCompletionError::BadInputJson {
+                            id: tool_call.id.into(),
+                            tool_name: tool_call.name.as_str().into(),
+                            raw_input: tool_call.arguments.into(),
+                            json_parse_error: error.to_string(),
+                        }),
+                    }
+                }));
+
+                events.push(Ok(LanguageModelCompletionEvent::Stop(StopReason::ToolUse)));
+            }
+            Some(stop_reason) => {
+                log::error!("Unexpected DeepSeek stop_reason: {stop_reason:?}",);
+                events.push(Ok(LanguageModelCompletionEvent::Stop(StopReason::EndTurn)));
+            }
+            None => {}
+        }
+
+        events
+    }
+}
+
+#[derive(Default)]
+struct RawToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+pub fn count_deepseek_tokens(
+    request: LanguageModelRequest,
+    _model: deepseek::Model,
+    cx: &App,
+) -> BoxFuture<'static, Result<usize>> {
+    cx.background_spawn(async move {
+        let messages = request
+            .messages
+            .into_iter()
+            .map(|message| tiktoken_rs::ChatCompletionRequestMessage {
+                role: match message.role {
+                    Role::User => "user".into(),
+                    Role::Assistant => "assistant".into(),
+                    Role::System => "system".into(),
+                },
+                content: Some(message.string_contents()),
+                name: None,
+                function_call: None,
+            })
+            .collect::<Vec<_>>();
+
+        tiktoken_rs::num_tokens_from_messages("gpt-4o", &messages)
+    })
+    .boxed()
 }
 
 struct ConfigurationView {

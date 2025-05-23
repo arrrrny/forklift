@@ -171,37 +171,85 @@ impl From<Role> for String {
 }
 
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Model {
     pub name: String,
     pub display_name: Option<String>,
     pub max_tokens: usize,
     pub max_output_tokens: Option<u32>,
+    pub max_completion_tokens: Option<u32>,
+    pub supports_tools: Option<bool>,
 }
 
 impl Model {
-    pub fn from_id(id: &str) -> Self {
-        Self {
-            name: id.to_string(),
-            display_name: None,
-            max_tokens: 64000,
-            max_output_tokens: Some(8192),
-        }
-    }
-    pub fn id(&self) -> &str {
-        &self.name
-    }
-    pub fn display_name(&self) -> &str {
-        self.display_name.as_deref().unwrap_or(&self.name)
-    }
-    pub fn max_token_count(&self) -> usize {
-        self.max_tokens
-    }
     pub fn max_output_tokens(&self) -> Option<u32> {
         self.max_output_tokens
     }
-}
 
+    pub fn default_fast() -> Self {
+        Self::new(
+            "litellm/auto",
+            Some("Auto Router"),
+            Some(2000000),
+            None,
+            None,
+            Some(true),
+        )
+    }
+
+    pub fn default() -> Self {
+        Self::default_fast()
+    }
+
+    pub fn new(
+        name: &str,
+        display_name: Option<&str>,
+        max_tokens: Option<usize>,
+        max_output_tokens: Option<u32>,
+        max_completion_tokens: Option<u32>,
+        supports_tools: Option<bool>,
+    ) -> Self {
+        Self {
+            name: name.to_owned(),
+            display_name: display_name.map(|s| s.to_owned()),
+            max_tokens: max_tokens.unwrap_or(2000000),
+            max_output_tokens,
+            max_completion_tokens,
+            supports_tools,
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        Self {
+            name: id.to_owned(),
+            display_name: None,
+            max_tokens: 2000000,
+            max_output_tokens: None,
+            max_completion_tokens: None,
+            supports_tools: None,
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.name
+    }
+
+    pub fn display_name(&self) -> &str {
+        self.display_name.as_ref().unwrap_or(&self.name)
+    }
+
+    pub fn max_token_count(&self) -> usize {
+        self.max_tokens
+    }
+
+    pub fn supports_tool_calls(&self) -> bool {
+        self.supports_tools.unwrap_or(false)
+    }
+
+    pub fn supports_parallel_tool_calls(&self) -> bool {
+        false
+    }
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Request {
     pub model: String,
@@ -209,12 +257,18 @@ pub struct Request {
     pub stream: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stop: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_format: Option<ResponseFormat>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDefinition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -223,6 +277,15 @@ pub enum ResponseFormat {
     Text,
     #[serde(rename = "json_object")]
     JsonObject,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    Auto,
+    Required,
+    None,
+    Other(ToolDefinition),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -256,6 +319,11 @@ pub enum RequestMessage {
         content: String,
         tool_call_id: String,
     },
+    #[serde(rename = "function")]
+    Function {
+        content: String,
+        name: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -287,6 +355,8 @@ pub struct Response {
     pub usage: Usage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

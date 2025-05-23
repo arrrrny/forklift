@@ -1,15 +1,23 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context as _, Result, anyhow};
 use futures::{
-    AsyncBufReadExt, AsyncReadExt,
+    AsyncBufReadExt, AsyncReadExt, StreamExt,
     io::BufReader,
-    stream::{BoxStream, StreamExt},
+    stream::{self, BoxStream},
 };
 use http_client::{AsyncBody, HttpClient, Method, Request as HttpRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    future::{self, Future},
+};
+use strum::EnumIter;
 
-pub const DEEPSEEK_API_URL: &str = "https://api.deepseek.com";
+pub const DEEPSEEK_API_URL: &str = "https://api.deepseek.com/beta";
+
+fn is_none_or_empty<T: AsRef<[U]>, U>(opt: &Option<T>) -> bool {
+    opt.as_ref().map_or(true, |v| v.as_ref().is_empty())
+}
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -46,13 +54,13 @@ impl From<Role> for String {
 }
 
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, EnumIter)]
 pub enum Model {
-    #[serde(rename = "deepseek-chat")]
-    #[default]
+    #[serde(rename = "deepseek-chat", alias = "deepseek-chat")]
     Chat,
-    #[serde(rename = "deepseek-reasoner")]
+    #[serde(rename = "deepseek-reasoner", alias = "deepseek-reasoner")]
     Reasoner,
+
     #[serde(rename = "custom")]
     Custom {
         name: String,
@@ -65,14 +73,14 @@ pub enum Model {
 
 impl Model {
     pub fn default_fast() -> Self {
-        Model::Chat
+        Self::Chat
     }
 
     pub fn from_id(id: &str) -> Result<Self> {
         match id {
             "deepseek-chat" => Ok(Self::Chat),
             "deepseek-reasoner" => Ok(Self::Reasoner),
-            _ => anyhow::bail!("invalid model id {id}"),
+            invalid_id => anyhow::bail!("invalid model id '{invalid_id}'"),
         }
     }
 
@@ -90,24 +98,34 @@ impl Model {
             Self::Reasoner => "DeepSeek Reasoner",
             Self::Custom {
                 name, display_name, ..
-            } => display_name.as_ref().unwrap_or(name).as_str(),
+            } => display_name.as_ref().unwrap_or(name),
         }
     }
 
     pub fn max_token_count(&self) -> usize {
         match self {
-            Self::Chat | Self::Reasoner => 64_000,
-            Self::Custom { max_tokens, .. } => *max_tokens,
+            Model::Chat | Model::Reasoner => 64_000,
+            Model::Custom { max_tokens, .. } => *max_tokens,
         }
     }
 
     pub fn max_output_tokens(&self) -> Option<u32> {
         match self {
-            Self::Chat => Some(8_192),
-            Self::Reasoner => Some(8_192),
-            Self::Custom {
+            Model::Chat => Some(8_192),
+            Model::Reasoner => Some(8_192),
+            Model::Custom {
                 max_output_tokens, ..
             } => *max_output_tokens,
+        }
+    }
+
+    /// Returns whether the given model supports the `parallel_tool_calls` parameter.
+    ///
+    /// If the model does not support the parameter, do not pass it up, or the API will return an error.
+    pub fn supports_parallel_tool_calls(&self) -> bool {
+        match self {
+            Self::Chat | Self::Reasoner => true,
+            Self::Custom { .. } => true,
         }
     }
 }
@@ -119,29 +137,53 @@ pub struct Request {
     pub stream: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stop: Vec<String>,
+    pub temperature: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
+    pub tool_choice: Option<ToolChoice>,
+    /// Whether to enable parallel function calling during tool use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_format: Option<ResponseFormat>,
+    pub parallel_tool_calls: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDefinition>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResponseFormat {
-    Text,
-    #[serde(rename = "json_object")]
-    JsonObject,
+pub struct CompletionRequest {
+    pub model: String,
+    pub prompt: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prediction: Option<Prediction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewrite_speculation: Option<bool>,
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Prediction {
+    Content { content: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    Auto,
+    Required,
+    None,
+    Other(ToolDefinition),
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolDefinition {
+    #[allow(dead_code)]
     Function { function: FunctionDefinition },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FunctionDefinition {
     pub name: String,
     pub description: Option<String>,
@@ -152,20 +194,73 @@ pub struct FunctionDefinition {
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum RequestMessage {
     Assistant {
-        content: Option<String>,
+        content: MessageContent,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
     },
     User {
-        content: String,
+        content: MessageContent,
     },
     System {
-        content: String,
+        content: MessageContent,
     },
     Tool {
-        content: String,
+        content: MessageContent,
         tool_call_id: String,
     },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(untagged)]
+pub enum MessageContent {
+    Plain(String),
+    Multipart(Vec<MessagePart>),
+}
+
+impl MessageContent {
+    pub fn empty() -> Self {
+        MessageContent::Multipart(vec![])
+    }
+
+    pub fn push_part(&mut self, part: MessagePart) {
+        match self {
+            MessageContent::Plain(text) => {
+                *self =
+                    MessageContent::Multipart(vec![MessagePart::Text { text: text.clone() }, part]);
+            }
+            MessageContent::Multipart(parts) if parts.is_empty() => match part {
+                MessagePart::Text { text } => *self = MessageContent::Plain(text),
+                MessagePart::Image { .. } => *self = MessageContent::Multipart(vec![part]),
+            },
+            MessageContent::Multipart(parts) => parts.push(part),
+        }
+    }
+}
+
+impl From<Vec<MessagePart>> for MessageContent {
+    fn from(mut parts: Vec<MessagePart>) -> Self {
+        if let [MessagePart::Text { text }] = parts.as_mut_slice() {
+            MessageContent::Plain(std::mem::take(text))
+        } else {
+            MessageContent::Multipart(parts)
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(tag = "type")]
+pub enum MessagePart {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image_url")]
+    Image { image_url: ImageUrl },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
+pub struct ImageUrl {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -187,6 +282,75 @@ pub struct FunctionContent {
     pub arguments: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub struct ResponseMessageDelta {
+    pub role: Option<Role>,
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "is_none_or_empty")]
+    pub tool_calls: Option<Vec<ToolCallChunk>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub struct ToolCallChunk {
+    pub index: usize,
+    pub id: Option<String>,
+
+    // There is also an optional `type` field that would determine if a
+    // function is there. Sometimes this streams in with the `function` before
+    // it streams in the `type`
+    pub function: Option<FunctionChunk>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub struct FunctionChunk {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ChoiceDelta {
+    pub index: u32,
+    pub delta: ResponseMessageDelta,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum ResponseStreamResult {
+    Ok(ResponseStreamEvent),
+    Err { error: String },
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ResponseStreamEvent {
+    pub created: u32,
+    pub model: String,
+    pub choices: Vec<ChoiceDelta>,
+    pub usage: Option<Usage>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CompletionResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<CompletionChoice>,
+    pub usage: Usage,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CompletionChoice {
+    pub text: String,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Response {
     pub id: String,
@@ -195,19 +359,6 @@ pub struct Response {
     pub model: String,
     pub choices: Vec<Choice>,
     pub usage: Usage,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_content: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Usage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
-    #[serde(default)]
-    pub prompt_cache_hit_tokens: u32,
-    #[serde(default)]
-    pub prompt_cache_miss_tokens: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -217,52 +368,65 @@ pub struct Choice {
     pub finish_reason: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct StreamResponse {
-    pub id: String,
-    pub object: String,
-    pub created: u64,
-    pub model: String,
-    pub choices: Vec<StreamChoice>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct StreamChoice {
-    pub index: u32,
-    pub delta: StreamDelta,
-    pub finish_reason: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct StreamDelta {
-    pub role: Option<Role>,
-    pub content: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCallChunk>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_content: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ToolCallChunk {
-    pub index: usize,
-    pub id: Option<String>,
-    pub function: Option<FunctionChunk>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct FunctionChunk {
-    pub name: Option<String>,
-    pub arguments: Option<String>,
-}
-
-pub async fn stream_completion(
+pub async fn complete(
     client: &dyn HttpClient,
     api_url: &str,
     api_key: &str,
     request: Request,
-) -> Result<BoxStream<'static, Result<StreamResponse>>> {
-    let uri = format!("{api_url}/v1/chat/completions");
+) -> Result<Response> {
+    let uri = format!("{api_url}/chat/completions");
+    let request_builder = HttpRequest::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key));
+
+    let mut request_body = request;
+    request_body.stream = false;
+
+    let request = request_builder.body(AsyncBody::from(serde_json::to_string(&request_body)?))?;
+    let mut response = client.send(request).await?;
+
+    if response.status().is_success() {
+        let mut body = String::new();
+        response.body_mut().read_to_string(&mut body).await?;
+        let response: Response = serde_json::from_str(&body)?;
+        Ok(response)
+    } else {
+        let mut body = String::new();
+        response.body_mut().read_to_string(&mut body).await?;
+
+        #[derive(Deserialize)]
+        struct DeepSeekResponse {
+            error: DeepSeekError,
+        }
+
+        #[derive(Deserialize)]
+        struct DeepSeekError {
+            message: String,
+        }
+
+        match serde_json::from_str::<DeepSeekResponse>(&body) {
+            Ok(response) if !response.error.message.is_empty() => anyhow::bail!(
+                "Failed to connect to DeepSeek API: {}",
+                response.error.message,
+            ),
+            _ => anyhow::bail!(
+                "Failed to connect to DeepSeek API: {} {}",
+                response.status(),
+                body,
+            ),
+        }
+    }
+}
+
+pub async fn complete_text(
+    client: &dyn HttpClient,
+    api_url: &str,
+    api_key: &str,
+    request: CompletionRequest,
+) -> Result<CompletionResponse> {
+    let uri = format!("{api_url}/completions");
     let request_builder = HttpRequest::builder()
         .method(Method::POST)
         .uri(uri)
@@ -272,6 +436,112 @@ pub async fn stream_completion(
     let request = request_builder.body(AsyncBody::from(serde_json::to_string(&request)?))?;
     let mut response = client.send(request).await?;
 
+    if response.status().is_success() {
+        let mut body = String::new();
+        response.body_mut().read_to_string(&mut body).await?;
+        let response = serde_json::from_str(&body)?;
+        Ok(response)
+    } else {
+        let mut body = String::new();
+        response.body_mut().read_to_string(&mut body).await?;
+
+        #[derive(Deserialize)]
+        struct DeepSeekResponse {
+            error: DeepSeekError,
+        }
+
+        #[derive(Deserialize)]
+        struct DeepSeekError {
+            message: String,
+        }
+
+        match serde_json::from_str::<DeepSeekResponse>(&body) {
+            Ok(response) if !response.error.message.is_empty() => anyhow::bail!(
+                "Failed to connect to DeepSeek API: {}",
+                response.error.message,
+            ),
+            _ => anyhow::bail!(
+                "Failed to connect to DeepSeek API: {} {}",
+                response.status(),
+                body,
+            ),
+        }
+    }
+}
+
+fn adapt_response_to_stream(response: Response) -> ResponseStreamEvent {
+    ResponseStreamEvent {
+        created: response.created as u32,
+        model: response.model,
+        choices: response
+            .choices
+            .into_iter()
+            .map(|choice| {
+                let content = match &choice.message {
+                    RequestMessage::Assistant { content, .. } => content,
+                    RequestMessage::User { content } => content,
+                    RequestMessage::System { content } => content,
+                    RequestMessage::Tool { content, .. } => content,
+                };
+
+                let mut text_content = String::new();
+                match content {
+                    MessageContent::Plain(text) => text_content.push_str(&text),
+                    MessageContent::Multipart(parts) => {
+                        for part in parts {
+                            match part {
+                                MessagePart::Text { text } => text_content.push_str(&text),
+                                MessagePart::Image { .. } => {}
+                            }
+                        }
+                    }
+                };
+
+                ChoiceDelta {
+                    index: choice.index,
+                    delta: ResponseMessageDelta {
+                        role: Some(match choice.message {
+                            RequestMessage::Assistant { .. } => Role::Assistant,
+                            RequestMessage::User { .. } => Role::User,
+                            RequestMessage::System { .. } => Role::System,
+                            RequestMessage::Tool { .. } => Role::Tool,
+                        }),
+                        content: if text_content.is_empty() {
+                            None
+                        } else {
+                            Some(text_content)
+                        },
+                        tool_calls: None,
+                    },
+                    finish_reason: choice.finish_reason,
+                }
+            })
+            .collect(),
+        usage: Some(response.usage),
+    }
+}
+
+pub async fn stream_completion(
+    client: &dyn HttpClient,
+    api_url: &str,
+    api_key: &str,
+    request: Request,
+) -> Result<BoxStream<'static, Result<ResponseStreamEvent>>> {
+    if request.model.starts_with("o1") {
+        let response = complete(client, api_url, api_key, request).await;
+        let response_stream_event = response.map(adapt_response_to_stream);
+        return Ok(stream::once(future::ready(response_stream_event)).boxed());
+    }
+
+    let uri = format!("{api_url}/chat/completions");
+    let request_builder = HttpRequest::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key));
+
+    let request = request_builder.body(AsyncBody::from(serde_json::to_string(&request)?))?;
+    let mut response = client.send(request).await?;
     if response.status().is_success() {
         let reader = BufReader::new(response.into_body());
         Ok(reader
@@ -284,7 +554,10 @@ pub async fn stream_completion(
                             None
                         } else {
                             match serde_json::from_str(line) {
-                                Ok(response) => Some(Ok(response)),
+                                Ok(ResponseStreamResult::Ok(response)) => Some(Ok(response)),
+                                Ok(ResponseStreamResult::Err { error }) => {
+                                    Some(Err(anyhow!(error)))
+                                }
                                 Err(error) => Some(Err(anyhow!(error))),
                             }
                         }
@@ -296,10 +569,91 @@ pub async fn stream_completion(
     } else {
         let mut body = String::new();
         response.body_mut().read_to_string(&mut body).await?;
-        anyhow::bail!(
-            "Failed to connect to DeepSeek API: {} {}",
+
+        #[derive(Deserialize)]
+        struct DeepSeekResponse {
+            error: DeepSeekError,
+        }
+
+        #[derive(Deserialize)]
+        struct DeepSeekError {
+            message: String,
+        }
+
+        match serde_json::from_str::<DeepSeekResponse>(&body) {
+            Ok(response) if !response.error.message.is_empty() => Err(anyhow!(
+                "Failed to connect to DeepSeek API: {}",
+                response.error.message,
+            )),
+
+            _ => anyhow::bail!(
+                "Failed to connect to DeepSeek API: {} {}",
+                response.status(),
+                body,
+            ),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Serialize, Deserialize)]
+pub enum DeepSeekEmbeddingModel {
+    #[serde(rename = "text-embedding-3-small")]
+    TextEmbedding3Small,
+    #[serde(rename = "text-embedding-3-large")]
+    TextEmbedding3Large,
+}
+
+#[derive(Serialize)]
+struct DeepSeekEmbeddingRequest<'a> {
+    model: DeepSeekEmbeddingModel,
+    input: Vec<&'a str>,
+}
+
+#[derive(Deserialize)]
+pub struct DeepSeekEmbeddingResponse {
+    pub data: Vec<DeepSeekEmbedding>,
+}
+
+#[derive(Deserialize)]
+pub struct DeepSeekEmbedding {
+    pub embedding: Vec<f32>,
+}
+
+pub fn embed<'a>(
+    client: &dyn HttpClient,
+    api_url: &str,
+    api_key: &str,
+    model: DeepSeekEmbeddingModel,
+    texts: impl IntoIterator<Item = &'a str>,
+) -> impl 'static + Future<Output = Result<DeepSeekEmbeddingResponse>> {
+    let uri = format!("{api_url}/embeddings");
+
+    let request = DeepSeekEmbeddingRequest {
+        model,
+        input: texts.into_iter().collect(),
+    };
+    let body = AsyncBody::from(serde_json::to_string(&request).unwrap());
+    let request = HttpRequest::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .body(body)
+        .map(|request| client.send(request));
+
+    async move {
+        let mut response = request?.await?;
+        let mut body = String::new();
+        response.body_mut().read_to_string(&mut body).await?;
+
+        anyhow::ensure!(
+            response.status().is_success(),
+            "error during embedding, status: {:?}, body: {:?}",
             response.status(),
-            body,
+            body
         );
+        let response: DeepSeekEmbeddingResponse =
+            serde_json::from_str(&body).context("failed to parse DeepSeek embedding response")?;
+        Ok(response)
     }
 }

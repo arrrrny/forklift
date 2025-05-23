@@ -15,12 +15,12 @@ use language_model::{
     AuthenticateError, LanguageModel, LanguageModelCompletionError, LanguageModelCompletionEvent,
     LanguageModelId, LanguageModelName, LanguageModelProvider, LanguageModelProviderId,
     LanguageModelProviderName, LanguageModelProviderState, LanguageModelRequest,
-    LanguageModelToolChoice, LanguageModelToolResultContent, LanguageModelToolUse, RateLimiter, 
-    Role, StopReason,
+    LanguageModelToolChoice, LanguageModelToolResultContent, LanguageModelToolUse, MessageContent,
+    RateLimiter, Role, StopReason, WrappedTextContent,
 };
 
-use litellm::ModelInfo;
-
+use crate::{AllLanguageModelSettings, ui::InstructionListItem};
+use litellm::{RequestMessage, ToolChoice};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore};
@@ -29,13 +29,11 @@ use theme::ThemeSettings;
 use ui::{Icon, IconName, List, Tooltip, prelude::*};
 use util::ResultExt;
 
-use crate::{AllLanguageModelSettings, ui::InstructionListItem};
-
 const PROVIDER_ID: &str = "litellm";
 const PROVIDER_NAME: &str = "LiteLLM";
 const LITELLM_API_KEY_VAR: &str = "LITELLM_API_KEY";
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct LiteLLMSettings {
     pub api_url: String,
     pub available_models: Vec<AvailableModel>,
@@ -47,6 +45,7 @@ pub struct AvailableModel {
     pub display_name: Option<String>,
     pub max_tokens: usize,
     pub max_output_tokens: Option<u32>,
+    pub max_completion_tokens: Option<u32>,
 }
 
 pub struct LiteLLMLanguageModelProvider {
@@ -58,7 +57,8 @@ pub struct State {
     api_key: Option<String>,
     api_key_from_env: bool,
     http_client: Arc<dyn HttpClient>,
-    cached_models: Option<Vec<ModelInfo>>,
+    available_models: Vec<AvailableModel>,
+    fetch_models_task: Option<Task<Result<()>>>,
     _subscription: Subscription,
 }
 
@@ -73,7 +73,6 @@ impl State {
             .litellm
             .api_url
             .clone();
-        let _client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             credentials_provider
                 .delete_credentials(&api_url, &cx)
@@ -82,7 +81,6 @@ impl State {
             this.update(cx, |this, cx| {
                 this.api_key = None;
                 this.api_key_from_env = false;
-                this.cached_models = None;
                 cx.notify();
             })
         })
@@ -91,37 +89,18 @@ impl State {
     fn set_api_key(&mut self, api_key: String, cx: &mut Context<Self>) -> Task<Result<()>> {
         let credentials_provider = <dyn CredentialsProvider>::global(cx);
         let api_url = AllLanguageModelSettings::get_global(cx)
-            .litellm
+            .open_router
             .api_url
             .clone();
-        let client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             credentials_provider
                 .write_credentials(&api_url, "Bearer", api_key.as_bytes(), &cx)
-                .await?;
-            // Update credentials and clear any existing cache
+                .await
+                .log_err();
             this.update(cx, |this, cx| {
-                this.api_key = Some(api_key.clone());
-                this.cached_models = None;
+                this.api_key = Some(api_key);
                 cx.notify();
-            })?;
-            // Fetch and cache models after setting API key
-
-            let models_api_url = api_url.clone();
-            let key = api_key.clone();
-            match litellm::fetch_models(&*client, &models_api_url, &key).await {
-                Ok(list) => {
-                    this.update(cx, |this, cx| {
-                        this.cached_models = Some(list);
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                Err(err) => {
-                    log::warn!("LiteLLM: failed to fetch models in set_api_key: {}", err);
-                }
-            }
-            Ok(())
+            })
         })
     }
 
@@ -135,7 +114,6 @@ impl State {
             .litellm
             .api_url
             .clone();
-        let client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             let (api_key, from_env) = if let Ok(api_key) = std::env::var(LITELLM_API_KEY_VAR) {
                 (api_key, true)
@@ -145,67 +123,56 @@ impl State {
                     .await?
                     .ok_or(AuthenticateError::CredentialsNotFound)?;
                 (
-                    String::from_utf8(api_key).context("invalid {PROVIDER_NAME} API key")?,
+                    String::from_utf8(api_key)
+                        .context(format!("invalid {} API key", PROVIDER_NAME))?,
                     false,
                 )
             };
-
-            // Update credentials
             this.update(cx, |this, cx| {
-                this.api_key = Some(api_key.clone());
+                this.api_key = Some(api_key);
                 this.api_key_from_env = from_env;
-                // Reset any previous cache on new auth
-                this.cached_models = None;
                 cx.notify();
             })?;
-
-            // Fetch and cache models once authenticated
-            let models_api_url = api_url.clone();
-            let key = api_key.clone();
-            match litellm::fetch_models(&*client, &models_api_url, &key).await {
-                Ok(list) => {
-                    this.update(cx, |this, cx| {
-                        this.cached_models = Some(list);
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                Err(err) => {
-                    // silently ignore fetch errors
-                    log::warn!("LiteLLM: failed to fetch models: {}", err);
-                }
-            }
-
             Ok(())
         })
     }
 
     fn fetch_models(&mut self, cx: &mut Context<Self>) -> Task<Result<()>> {
-        let api_url = AllLanguageModelSettings::get_global(cx)
-            .litellm
-            .api_url
-            .clone();
-        let client = self.http_client.clone();
-        let api_key = if let Some(k) = self.api_key.clone() {
-            k
-        } else {
-            return Task::ready(Ok(()));
-        };
+        let settings = &AllLanguageModelSettings::get_global(cx).litellm;
+        let http_client = self.http_client.clone();
+        let api_url = settings.api_url.clone();
+        let api_key = self.api_key.clone();
         cx.spawn(async move |this, cx| {
-            match litellm::fetch_models(&*client, &api_url, &api_key).await {
-                Ok(list) => {
-                    this.update(cx, |this, cx| {
-                        this.cached_models = Some(list);
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                Err(err) => {
-                    log::warn!("LiteLLM: failed to fetch models: {}", err);
+            if let Some(api_key) = api_key {
+                match litellm::fetch_models(&*http_client, &api_url, &api_key).await {
+                    Ok(list) => {
+                        this.update(cx, |this, cx| {
+                            this.available_models = list
+                                .into_iter()
+                                .map(|info| AvailableModel {
+                                    name: info.id,
+                                    display_name: info.name,
+                                    max_tokens: info.max_tokens.unwrap_or(0) as usize,
+                                    max_output_tokens: info.max_output_tokens,
+                                    max_completion_tokens: None,
+                                })
+                                .collect();
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                    Err(err) => {
+                        log::warn!("LiteLLM: failed to fetch models: {}", err);
+                    }
                 }
             }
             Ok(())
         })
+    }
+
+    fn restart_fetch_models_task(&mut self, cx: &mut Context<Self>) {
+        let task = self.fetch_models(cx);
+        self.fetch_models_task.replace(task);
     }
 }
 impl LiteLLMLanguageModelProvider {
@@ -214,8 +181,10 @@ impl LiteLLMLanguageModelProvider {
             api_key: None,
             api_key_from_env: false,
             http_client: http_client.clone(),
-            cached_models: None,
-            _subscription: cx.observe_global::<SettingsStore>(|_this: &mut State, cx| {
+            available_models: Vec::new(),
+            fetch_models_task: None,
+            _subscription: cx.observe_global::<SettingsStore>(|this: &mut State, cx| {
+                this.restart_fetch_models_task(cx);
                 cx.notify();
             }),
         });
@@ -256,25 +225,33 @@ impl LanguageModelProvider for LiteLLMLanguageModelProvider {
     }
 
     fn default_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
-        Some(self.create_language_model(litellm::Model::from_id("github_copilot/gpt-4o")))
+        Some(self.create_language_model(litellm::Model {
+            name: "github_copilot/gpt-4o".to_string(),
+            display_name: None,
+            max_tokens: 128000,
+            max_output_tokens: None,
+            max_completion_tokens: None,
+            supports_tools: Some(true),
+        }))
     }
 
     fn provided_models(&self, cx: &App) -> Vec<Arc<dyn LanguageModel>> {
-        if let Some(list) = &self.state.read(cx).cached_models {
-            list.iter()
-                .map(|info| {
-                    let model = litellm::Model {
-                        name: info.id.clone(),
-                        display_name: info.name.clone(),
-                        max_tokens: info.max_tokens.unwrap_or(0) as usize,
-                        max_output_tokens: info.max_output_tokens,
-                    };
-                    self.create_language_model(model)
-                })
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.state
+            .read(cx)
+            .available_models
+            .iter()
+            .map(|model| {
+                let model = litellm::Model {
+                    name: model.name.clone(),
+                    display_name: model.display_name.clone(),
+                    max_tokens: model.max_tokens,
+                    max_output_tokens: model.max_output_tokens,
+                    max_completion_tokens: model.max_completion_tokens,
+                    supports_tools: Some(true),
+                };
+                self.create_language_model(model)
+            })
+            .collect()
     }
 
     fn is_authenticated(&self, cx: &App) -> bool {
@@ -608,14 +585,22 @@ pub fn into_litellm(
                         });
                     }
                 }
-                language_model::MessageContent::ToolResult(tool_result) => {
-                    // LiteLLM requires a tool message for every tool call, even with empty content
+                MessageContent::ToolResult(tool_result) => {
                     let content = match &tool_result.content {
-                        LanguageModelToolResultContent::Text(text) => text.to_string(),
-                        LanguageModelToolResultContent::Image(_) => String::new(),
+                        LanguageModelToolResultContent::Text(text)
+                        | LanguageModelToolResultContent::WrappedText(WrappedTextContent {
+                            text,
+                            ..
+                        }) => {
+                          text.to_string()
+                        }
+                        LanguageModelToolResultContent::Image(_) => {
+                          "[Tool responded with an image, but Zed doesn't support these in Open AI models yet]".to_string()
+                        }
                     };
-                    messages.push(litellm::RequestMessage::Tool {
-                        content,
+
+                    messages.push(RequestMessage::Tool {
+                        content: content,
                         tool_call_id: tool_result.tool_use_id.to_string(),
                     });
                 }
@@ -630,6 +615,13 @@ pub fn into_litellm(
         max_tokens: max_output_tokens,
         temperature: Some(0.2),
         response_format: None,
+        stop: request.stop,
+        tool_choice: request.tool_choice.map(|choice| match choice {
+            LanguageModelToolChoice::Auto => ToolChoice::Auto,
+            LanguageModelToolChoice::Any => ToolChoice::Required,
+            LanguageModelToolChoice::None => ToolChoice::None,
+        }),
+        parallel_tool_calls: None,
         tools: request
             .tools
             .into_iter()
