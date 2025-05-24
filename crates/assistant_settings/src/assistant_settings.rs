@@ -47,7 +47,7 @@ pub enum NotifyWhenAgentWaiting {
 #[schemars(deny_unknown_fields)]
 pub enum AssistantProviderContentV1 {
     #[serde(rename = "zed.dev")]
-    ZedDotDev { default_model: Option<CloudModel> },
+    ZedDotDev { default_model: Option<String> },
     #[serde(rename = "openai")]
     OpenAi {
         default_model: Option<OpenAiModel>,
@@ -234,7 +234,7 @@ impl AssistantSettingsContent {
                             AssistantProviderContentV1::ZedDotDev { default_model } => {
                                 default_model.map(|model| LanguageModelSelection {
                                     provider: "zed.dev".into(),
-                                    model: model.id().to_string(),
+                                    model,
                                 })
                             }
                             AssistantProviderContentV1::OpenAi { default_model, .. } => {
