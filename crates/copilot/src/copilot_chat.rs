@@ -160,7 +160,7 @@ impl Model {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Request {
     pub intent: bool,
     pub n: usize,
@@ -174,20 +174,20 @@ pub struct Request {
     pub tool_choice: Option<ToolChoice>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Function {
     pub name: String,
     pub description: String,
     pub parameters: serde_json::Value,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Tool {
     Function { function: Function },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolChoice {
     Auto,
@@ -443,6 +443,10 @@ impl CopilotChat {
         request: Request,
         mut cx: AsyncApp,
     ) -> Result<BoxStream<'static, Result<ResponseEvent>>> {
+        log::info!("Initiating Copilot chat completion request for model: {}", request.model);
+        log::debug!("Request details - messages: {}, streaming: {}, temperature: {:?}", 
+                   request.messages.len(), request.stream, request.temperature);
+        
         let this = cx
             .update(|cx| Self::global(cx))
             .ok()
@@ -460,13 +464,18 @@ impl CopilotChat {
         let oauth_token = oauth_token.context("No OAuth token available")?;
 
         let token = match api_token {
-            Some(api_token) if api_token.remaining_seconds() > 5 * 60 => api_token.clone(),
+            Some(api_token) if api_token.remaining_seconds() > 5 * 60 => {
+                log::debug!("Using cached API token ({}s remaining)", api_token.remaining_seconds());
+                api_token.clone()
+            },
             _ => {
+                log::debug!("Requesting new API token");
                 let token = request_api_token(&oauth_token, client.clone()).await?;
                 this.update(&mut cx, |this, cx| {
                     this.api_token = Some(token.clone());
                     cx.notify();
                 })?;
+                log::debug!("Successfully obtained new API token");
                 token
             }
         };
@@ -532,6 +541,11 @@ async fn request_models(api_token: String, client: Arc<dyn HttpClient>) -> Resul
 }
 
 async fn request_api_token(oauth_token: &str, client: Arc<dyn HttpClient>) -> Result<ApiToken> {
+    log::debug!("Requesting Copilot API token from: {}", COPILOT_CHAT_AUTH_URL);
+    log::debug!("API token request headers:");
+    log::debug!("  Authorization: token [REDACTED]");
+    log::debug!("  Accept: application/json");
+    
     let request_builder = HttpRequest::builder()
         .method(Method::GET)
         .uri(COPILOT_CHAT_AUTH_URL)
@@ -542,11 +556,15 @@ async fn request_api_token(oauth_token: &str, client: Arc<dyn HttpClient>) -> Re
 
     let mut response = client.send(request).await?;
 
+    log::debug!("API token response status: {}", response.status());
+    log::debug!("API token response headers: {:?}", response.headers());
+
     if response.status().is_success() {
         let mut body = Vec::new();
         response.body_mut().read_to_end(&mut body).await?;
 
         let body_str = std::str::from_utf8(&body)?;
+        log::debug!("API token response body: {}", body_str);
 
         let parsed: ApiTokenResponse = serde_json::from_str(body_str)?;
         ApiToken::try_from(parsed)
@@ -555,6 +573,7 @@ async fn request_api_token(oauth_token: &str, client: Arc<dyn HttpClient>) -> Re
         response.body_mut().read_to_end(&mut body).await?;
 
         let body_str = std::str::from_utf8(&body)?;
+        log::error!("Failed to request API token - status: {}, body: {}", response.status(), body_str);
         anyhow::bail!("Failed to request API token: {body_str}");
     }
 }
@@ -581,6 +600,7 @@ async fn stream_completion(
     api_key: String,
     request: Request,
 ) -> Result<BoxStream<'static, Result<ResponseEvent>>> {
+    log::debug!("Copilot chat request: {:?}", request);
     let is_vision_request = request.messages.last().map_or(false, |message| match message {
         ChatMessage::User { content }
         | ChatMessage::Assistant { content, .. }
@@ -608,13 +628,28 @@ async fn stream_completion(
     let is_streaming = request.stream;
 
     let json = serde_json::to_string(&request)?;
+    log::debug!("Copilot chat HTTP payload: {}", json);
+    
+    // Log headers
+    log::debug!("Copilot chat request headers:");
+    log::debug!("  Editor-Version: Zed/{}", option_env!("CARGO_PKG_VERSION").unwrap_or("unknown"));
+    log::debug!("  Authorization: Bearer [REDACTED]");
+    log::debug!("  Content-Type: application/json");
+    log::debug!("  Copilot-Integration-Id: vscode-chat");
+    log::debug!("  Copilot-Vision-Request: {}", is_vision_request);
+    log::debug!("  URL: {}", COPILOT_CHAT_COMPLETION_URL);
+    
     let request = request_builder.body(AsyncBody::from(json))?;
     let mut response = client.send(request).await?;
+
+    log::debug!("Copilot chat response status: {}", response.status());
+    log::debug!("Copilot chat response headers: {:?}", response.headers());
 
     if !response.status().is_success() {
         let mut body = Vec::new();
         response.body_mut().read_to_end(&mut body).await?;
         let body_str = std::str::from_utf8(&body)?;
+        log::error!("Copilot chat API error response body: {}", body_str);
         anyhow::bail!(
             "Failed to connect to API: {} {}",
             response.status(),
@@ -636,13 +671,17 @@ async fn stream_completion(
 
                         match serde_json::from_str::<ResponseEvent>(line) {
                             Ok(response) => {
+                                log::debug!("Copilot chat streaming response chunk: {}", line);
                                 if response.choices.is_empty() {
                                     None
                                 } else {
                                     Some(Ok(response))
                                 }
                             }
-                            Err(error) => Some(Err(anyhow!(error))),
+                            Err(error) => {
+                                log::error!("Failed to parse Copilot chat streaming response: {} (line: {})", error, line);
+                                Some(Err(anyhow!(error)))
+                            }
                         }
                     }
                     Err(error) => Some(Err(anyhow!(error))),
@@ -653,6 +692,7 @@ async fn stream_completion(
         let mut body = Vec::new();
         response.body_mut().read_to_end(&mut body).await?;
         let body_str = std::str::from_utf8(&body)?;
+        log::debug!("Copilot chat non-streaming response body: {}", body_str);
         let response: ResponseEvent = serde_json::from_str(body_str)?;
 
         Ok(futures::stream::once(async move { Ok(response) }).boxed())

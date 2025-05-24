@@ -683,16 +683,6 @@ impl ConfigurationView {
         }
     }
 
-    fn retry_fetch_models(&mut self, cx: &mut Context<Self>) {
-        let state = self.state.clone();
-        self.loading_models_task = Some(cx.spawn(async move |_this, cx| {
-            state
-                .update(cx, |state, cx| state.fetch_models(cx))
-                .log_err();
-            Ok(())
-        }));
-    }
-
     fn save_api_key(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
         let api_key = self.api_key_editor.read(cx).text(cx);
         if api_key.is_empty() {
