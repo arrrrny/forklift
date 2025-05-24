@@ -1588,6 +1588,9 @@
     },
     "mistral": {
       "api_url": "https://api.mistral.ai/v1"
+    },
+    "litellm": {
+      "api_url": "http://localhost:4000"
     }
   },
   // Zed's Prettier integration settings.

@@ -13,23 +13,46 @@ pub const LITELLM_API_URL: &str = "http://localhost:4000";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelInfo {
-    pub id: String,
-    pub name: Option<String>,
-    pub max_tokens: Option<usize>,
-    pub max_output_tokens: Option<u32>,
+    pub id: String,                     // Will be populated from model_name
+    pub name: Option<String>, // Will also be populated from model_name or a formatted version
+    pub max_tokens: Option<usize>, // Will be populated from litellm_params.model_info.max_tokens
+    pub max_output_tokens: Option<u32>, // Will be populated from litellm_params.model_info.max_output_tokens
+}
+
+// Structs to represent the new API response structure from /v1/model/info
+#[derive(Deserialize, Debug)]
+struct LiteLLMApiModelInfoResponse {
+    data: Vec<LiteLLMApiModelEntry>,
+}
+
+#[derive(Deserialize, Debug)]
+struct LiteLLMApiModelEntry {
+    model_name: String,
+    litellm_params: LiteLLMParams,
+    // We can add other fields from model_info if needed later
+}
+
+#[derive(Deserialize, Debug)]
+struct LiteLLMParams {
+    model_info: LiteLLMInnerModelInfo,
+}
+
+#[derive(Deserialize, Debug)]
+struct LiteLLMInnerModelInfo {
+    max_tokens: Option<u32>, // API provides this as a number
+    max_output_tokens: Option<u32>,
+    // Add other fields like 'supports_vision', 'supports_tool_calls' if needed for ModelInfo later
 }
 
 pub async fn fetch_models(
     client: &dyn HttpClient,
-    _api_url: &str,
+    _api_url: &str, // Use the passed api_url which should be the full path to /v1/model/info
     api_key: &str,
 ) -> anyhow::Result<Vec<ModelInfo>> {
-    let uri = format!("{}/v1/models", LITELLM_API_URL.trim_end_matches('/'));
-    log::info!("Fetching models from: {}", uri);
-
+    let uri = format!("{}/v1/model/info", _api_url.trim_end_matches('/'));
     // Detailed logging for HTTP request building
     log::debug!(
-        "Building HTTP GET request to {} with headers: Authorization: Bearer {}",
+        "Fetching models from (litellm.rs): {} with headers: Authorization: Bearer {}",
         uri,
         api_key
     );
@@ -78,59 +101,46 @@ pub async fn fetch_models(
         }
     };
 
-    // Handle different response formats - LiteLLM should follow OpenAI format
-    // but let's be more robust
-    if let Some(data_array) = json["data"].as_array() {
-        let models = data_array
-            .iter()
-            .map(|m| {
-                let model_info = serde_json::from_value(m.clone());
-                if let Err(ref e) = model_info {
-                    log::warn!("Failed to parse model info: {} - Raw data: {:?}", e, m);
-                }
-                model_info
-            })
-            .collect::<Result<Vec<ModelInfo>, _>>()?;
-
-        log::info!(
-            "Successfully fetched {} models from LiteLLM API",
-            models.len()
-        );
-        Ok(models)
-    } else {
-        // Try an alternate format where the models might be at the root level
-        log::warn!("Standard OpenAI format not found, trying alternate format");
-
-        // If the response is directly an array of models
-        if let Some(models_array) = json.as_array() {
-            let models = models_array
-                .iter()
-                .map(|m| -> anyhow::Result<ModelInfo> {
-                    // Try to extract id from the model object
-                    let id = m["id"]
-                        .as_str()
-                        .or_else(|| m["name"].as_str())
-                        .ok_or_else(|| anyhow!("Model missing id/name"))?
-                        .to_string();
-
-                    Ok(ModelInfo {
-                        id,
-                        name: m["name"].as_str().map(|s| s.to_string()),
-                        max_tokens: m["max_tokens"].as_u64().map(|n| n as usize),
-                        max_output_tokens: m["max_output_tokens"].as_u64().map(|n| n as u32),
-                    })
+    // Parse using the new structs
+    match serde_json::from_value::<LiteLLMApiModelInfoResponse>(json) {
+        Ok(parsed_response) => {
+            let models = parsed_response
+                .data
+                .into_iter()
+                .map(|entry| {
+                    log::debug!(
+                        "Processing model entry: {}, parsed max_tokens from API: {:?}",
+                        entry.model_name,
+                        entry.litellm_params.model_info.max_tokens
+                    );
+                    ModelInfo {
+                        id: entry.model_name.clone(),
+                        name: Some(entry.model_name), // Or use a prettified version if available/needed
+                        max_tokens: entry
+                            .litellm_params
+                            .model_info
+                            .max_tokens
+                            .map(|mt| mt as usize),
+                        max_output_tokens: entry.litellm_params.model_info.max_output_tokens,
+                    }
                 })
-                .collect::<anyhow::Result<Vec<ModelInfo>>>()?;
+                .collect::<Vec<ModelInfo>>();
 
             log::info!(
-                "Successfully fetched {} models from alternate format",
+                "Successfully fetched and parsed {} models from LiteLLM API (new format)",
                 models.len()
             );
             Ok(models)
-        } else {
-            log::error!("Invalid models response format: {:?}", json);
+        }
+        Err(err) => {
+            log::error!(
+                "Failed to parse models response with new structure: {}. Raw JSON: {}",
+                err,
+                String::from_utf8_lossy(&body)
+            );
             Err(anyhow!(
-                "Invalid models response format - unable to find models array"
+                "Failed to parse models response with new structure: {}",
+                err
             ))
         }
     }
@@ -188,9 +198,9 @@ impl Model {
 
     pub fn default_fast() -> Self {
         Self::new(
-            "litellm/auto",
+            "github_copilot/gpt-4o",
             Some("Auto Router"),
-            Some(2000000),
+            Some(128_000),
             None,
             None,
             Some(true),
@@ -212,7 +222,7 @@ impl Model {
         Self {
             name: name.to_owned(),
             display_name: display_name.map(|s| s.to_owned()),
-            max_tokens: max_tokens.unwrap_or(2000000),
+            max_tokens: max_tokens.unwrap_or(128_000),
             max_output_tokens,
             max_completion_tokens,
             supports_tools,
@@ -223,7 +233,7 @@ impl Model {
         Self {
             name: id.to_owned(),
             display_name: None,
-            max_tokens: 2000000,
+            max_tokens: 128_000,
             max_output_tokens: None,
             max_completion_tokens: None,
             supports_tools: None,
@@ -422,10 +432,7 @@ pub async fn stream_completion(
     api_key: &str,
     request: Request,
 ) -> Result<BoxStream<'static, Result<StreamResponse>>> {
-    let uri = format!(
-        "{}/v1/chat/completions",
-        LITELLM_API_URL.trim_end_matches('/')
-    );
+    let uri = format!("{}/v1/chat/completions", _api_url.trim_end_matches('/'));
     let request_builder = HttpRequest::builder()
         .method(Method::POST)
         .uri(uri)

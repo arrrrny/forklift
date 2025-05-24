@@ -440,6 +440,17 @@ impl settings::Settings for AllLanguageModelSettings {
                     .as_ref()
                     .and_then(|s| s.available_models.clone()),
             );
+
+            // LiteLLM
+            let litellm = value.litellm.clone();
+            merge(
+                &mut settings.litellm.api_url,
+                litellm.as_ref().and_then(|s| s.api_url.clone()),
+            );
+            merge(
+                &mut settings.litellm.available_models,
+                litellm.as_ref().and_then(|s| s.available_models.clone()),
+            );
         }
 
         Ok(settings)

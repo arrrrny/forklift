@@ -89,7 +89,7 @@ impl State {
     fn set_api_key(&mut self, api_key: String, cx: &mut Context<Self>) -> Task<Result<()>> {
         let credentials_provider = <dyn CredentialsProvider>::global(cx);
         let api_url = AllLanguageModelSettings::get_global(cx)
-            .open_router
+            .litellm
             .api_url
             .clone();
         cx.spawn(async move |this, cx| {
@@ -757,7 +757,7 @@ impl ConfigurationView {
 }
 
 impl Render for ConfigurationView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let env_var_set = self.state.read(cx).api_key_from_env;
 
         if self.load_credentials_task.is_some() {
@@ -766,16 +766,16 @@ impl Render for ConfigurationView {
             v_flex()
                 .size_full()
                 .on_action(cx.listener(Self::save_api_key))
-                .child(Label::new("To use Zed's assistant with litellm, you need to add an API key. Follow these steps:"))
+                .child(Label::new("To use Zed's assistant with LiteLLM, you need to add an API key. Follow these steps:"))
                 .child(
                     List::new()
                         .child(InstructionListItem::new(
-                            "Get your API key from the",
-                            Some("litellm console"),
-                            Some("https://platform.litellm.com/api_keys"),
+                            "Create an API key by visiting",
+                            Some("LiteLLM's console"),
+                            Some("http://localhost:4000/ui"),
                         ))
                         .child(InstructionListItem::text_only(
-                            "Ensure your litellm account has credits",
+                            "Ensure your key has access to models",
                         ))
                         .child(InstructionListItem::text_only(
                             "Paste your API key below and hit enter to start using the assistant",
@@ -794,16 +794,13 @@ impl Render for ConfigurationView {
                         .child(self.render_api_key_editor(cx)),
                 )
                 .child(
-                    Label::new(format!(
-                        "Or set the {} environment variable.",
-                        LITELLM_API_KEY_VAR
-                    ))
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+                    Label::new(
+                        format!("You can also assign the {LITELLM_API_KEY_VAR} environment variable and restart Zed."),
+                    )
+                    .size(LabelSize::Small).color(Color::Muted),
                 )
                 .into_any()
         } else {
-            let loading_models = self.loading_models_task.is_some();
             h_flex()
                 .mt_1()
                 .p_1()
@@ -817,54 +814,23 @@ impl Render for ConfigurationView {
                         .gap_1()
                         .child(Icon::new(IconName::Check).color(Color::Success))
                         .child(Label::new(if env_var_set {
-                            format!("API key set in {}", LITELLM_API_KEY_VAR)
+                            format!("API key set in {LITELLM_API_KEY_VAR} environment variable.")
                         } else {
-                            "API key configured".to_string()
+                            "API key configured.".to_string()
                         })),
                 )
                 .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Button::new("fetch-models", "Fetch Models")
-                                .label_size(LabelSize::Small)
-                                .icon(Some(IconName::Play))
-                                .icon_size(IconSize::Small)
-                                .on_click(cx.listener(|this, _event, _window, cx| {
-                                    this.retry_fetch_models(cx)
-                                }))
-                                .disabled(loading_models),
-                        )
-                        .child(
-                            Button::new("reset-key", "Reset Key")
-                                .label_size(LabelSize::Small)
-                                .icon(Some(IconName::Trash))
-                                .icon_size(IconSize::Small)
-                                .icon_position(IconPosition::Start)
-                                .disabled(env_var_set)
-                                .when(env_var_set, |this| {
-                                    this.tooltip(Tooltip::text(format!(
-                                        "To reset your API key, unset the {} environment variable.",
-                                        LITELLM_API_KEY_VAR
-                                    )))
-                                })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.reset_api_key(window, cx)
-                                })),
-                        ),
+                    Button::new("reset-key", "Reset Key")
+                        .label_size(LabelSize::Small)
+                        .icon(Some(IconName::Trash))
+                        .icon_size(IconSize::Small)
+                        .icon_position(IconPosition::Start)
+                        .disabled(env_var_set)
+                        .when(env_var_set, |this| {
+                            this.tooltip(Tooltip::text(format!("To reset your API key, unset the {LITELLM_API_KEY_VAR} environment variable.")))
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| this.reset_api_key(window, cx))),
                 )
-                .when(loading_models, |this| {
-                    this.child(
-                        h_flex()
-                            .gap_1()
-                            .child(Icon::new(IconName::Spinner).color(Color::Muted))
-                            .child(
-                                Label::new("Fetching models...")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            ),
-                    )
-                })
                 .into_any()
         }
     }
