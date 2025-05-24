@@ -640,7 +640,6 @@ struct ConfigurationView {
     api_key_editor: Entity<Editor>,
     state: Entity<State>,
     load_credentials_task: Option<Task<()>>,
-    loading_models_task: Option<Task<anyhow::Result<()>>>,
 }
 
 impl ConfigurationView {
@@ -679,7 +678,6 @@ impl ConfigurationView {
             api_key_editor,
             state,
             load_credentials_task,
-            loading_models_task: None,
         }
     }
 
