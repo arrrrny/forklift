@@ -8,7 +8,7 @@ use anyhow::{Result, bail};
 use collections::IndexMap;
 use deepseek::Model as DeepseekModel;
 use gpui::{App, Pixels, SharedString};
-use language_model::{CloudModel, LanguageModel};
+use language_model::LanguageModel;
 use litellm::Model as LiteLLMModel;
 use lmstudio::Model as LmStudioModel;
 use mistral::Model as MistralModel;
@@ -762,7 +762,6 @@ impl JsonSchema for LanguageModelProviderSetting {
                 "deepseek".into(),
                 "openrouter".into(),
                 "mistral".into(),
-                "litellm".into(),
                 "litellm".into(),
             ]),
             ..Default::default()
