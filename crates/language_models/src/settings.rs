@@ -443,10 +443,12 @@ impl settings::Settings for AllLanguageModelSettings {
 
             // LiteLLM
             let litellm = value.litellm.clone();
-            merge(
-                &mut settings.litellm.api_url,
-                litellm.as_ref().and_then(|s| s.api_url.clone()),
-            );
+            // Special handling for API URL - don't override default with empty string
+            if let Some(api_url) = litellm.as_ref().and_then(|s| s.api_url.clone()) {
+                if !api_url.trim().is_empty() {
+                    settings.litellm.api_url = api_url;
+                }
+            }
             merge(
                 &mut settings.litellm.available_models,
                 litellm.as_ref().and_then(|s| s.available_models.clone()),

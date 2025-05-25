@@ -33,10 +33,19 @@ const PROVIDER_ID: &str = "litellm";
 const PROVIDER_NAME: &str = "LiteLLM";
 const LITELLM_API_KEY_VAR: &str = "LITELLM_API_KEY";
 
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LiteLLMSettings {
     pub api_url: String,
     pub available_models: Vec<AvailableModel>,
+}
+
+impl Default for LiteLLMSettings {
+    fn default() -> Self {
+        Self {
+            api_url: litellm::LITELLM_API_URL.to_string(),
+            available_models: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -69,10 +78,8 @@ impl State {
 
     fn reset_api_key(&self, cx: &mut Context<Self>) -> Task<Result<()>> {
         let credentials_provider = <dyn CredentialsProvider>::global(cx);
-        let api_url = AllLanguageModelSettings::get_global(cx)
-            .litellm
-            .api_url
-            .clone();
+        let settings = &AllLanguageModelSettings::get_global(cx).litellm;
+        let api_url = settings.api_url.clone();
         cx.spawn(async move |this, cx| {
             credentials_provider
                 .delete_credentials(&api_url, &cx)
@@ -88,10 +95,8 @@ impl State {
 
     fn set_api_key(&mut self, api_key: String, cx: &mut Context<Self>) -> Task<Result<()>> {
         let credentials_provider = <dyn CredentialsProvider>::global(cx);
-        let api_url = AllLanguageModelSettings::get_global(cx)
-            .litellm
-            .api_url
-            .clone();
+        let settings = &AllLanguageModelSettings::get_global(cx).litellm;
+        let api_url = settings.api_url.clone();
         cx.spawn(async move |this, cx| {
             credentials_provider
                 .write_credentials(&api_url, "Bearer", api_key.as_bytes(), &cx)
@@ -293,11 +298,7 @@ impl LiteLLMLanguageModel {
         let http_client = self.http_client.clone();
         let Ok((api_key, api_url)) = cx.read_entity(&self.state, |state, cx| {
             let settings = &AllLanguageModelSettings::get_global(cx).litellm;
-            let api_url = if settings.api_url.trim().is_empty() {
-                litellm::LITELLM_API_URL.to_string()
-            } else {
-                settings.api_url.clone()
-            };
+            let api_url = settings.api_url.clone();
             (state.api_key.clone(), api_url)
         }) else {
             return futures::future::ready(Err(anyhow!("App state dropped"))).boxed();
@@ -821,5 +822,23 @@ impl Render for ConfigurationView {
                 )
                 .into_any()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_litellm_settings_default() {
+        let settings = LiteLLMSettings::default();
+        assert_eq!(settings.api_url, litellm::LITELLM_API_URL);
+        assert_eq!(settings.available_models, Vec::new());
+    }
+
+    #[test]
+    fn test_litellm_settings_default_url_value() {
+        let settings = LiteLLMSettings::default();
+        assert_eq!(settings.api_url, "http://localhost:4000");
     }
 }
