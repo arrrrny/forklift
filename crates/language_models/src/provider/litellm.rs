@@ -226,7 +226,7 @@ impl LanguageModelProvider for LiteLLMLanguageModelProvider {
     }
 
     fn icon(&self) -> IconName {
-        IconName::AiOpenAi // fallback, update if you add a custom LiteLLM icon
+        IconName::AiLiteLLM
     }
 
     fn default_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
@@ -765,6 +765,14 @@ impl Render for ConfigurationView {
                         ))
                         .child(InstructionListItem::text_only(
                             "Ensure your key has access to models",
+                        ))
+                        .child(InstructionListItem::text_only(
+                            r#"To set the API endpoint, add to your settings:
+"language_models": {
+  "litellm": {
+    "api_url": "http://localhost:4001"
+  }
+},"#,
                         ))
                         .child(InstructionListItem::text_only(
                             "Paste your API key below and hit enter to start using the assistant",

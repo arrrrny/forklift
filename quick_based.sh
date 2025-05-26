@@ -8,7 +8,7 @@ INSTALL_DIR="/Applications/FORKLIFT.app"
 BINARY_PATH="$CLONE_DIR/target/release/zed"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_LOGO_PATH="$SCRIPT_DIR/forklift_logo.png"
-WRAPPER_NAME="zed"
+WRAPPER_NAME="fork"
 SYMLINK_PATH="/usr/local/bin/$WRAPPER_NAME"
 
 # Check if repo exists
@@ -24,7 +24,7 @@ echo "No checks or updates will be performed."
 
 # Build ZED
 build_zed() {
-  echo "Building ZED with --release flag..."
+  echo "Building FORKLIFT with --release flag..."
   cd "$CLONE_DIR"
 
   # Set environment variables for faster compilation

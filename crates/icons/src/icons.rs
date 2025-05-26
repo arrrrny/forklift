@@ -14,6 +14,7 @@ pub enum IconName {
     AiDeepSeek,
     AiEdit,
     AiGoogle,
+    AiLiteLLM,
     AiLmStudio,
     AiMistral,
     AiOllama,
