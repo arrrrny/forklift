@@ -1,5 +1,5 @@
 [build]
-incremental = false
+# v0 mangling scheme provides more detailed backtraces around closures
 rustflags = ["-C", "symbol-mangling-version=v0", "--cfg", "tokio_unstable"]
 
 [alias]
@@ -16,9 +16,9 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 [target.'cfg(target_os = "windows")']
 rustflags = [
     "--cfg",
-    "windows_slim_errors",
+    "windows_slim_errors",        # This cfg will reduce the size of `windows::core::Error` from 16 bytes to 4 bytes
     "-C",
-    "target-feature=+crt-static",
+    "target-feature=+crt-static", # This fixes the linking issue when compiling livekit on Windows
 ]
 
 [env]

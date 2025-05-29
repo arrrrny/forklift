@@ -326,11 +326,14 @@ struct GroupedModels {
 
 impl GroupedModels {
     pub fn new(other: Vec<ModelInfo>, recommended: Vec<ModelInfo>) -> Self {
-        let recommended_ids: HashSet<_> = recommended.iter().map(|info| info.model.id()).collect();
+        let recommended_set: HashSet<_> = recommended
+            .iter()
+            .map(|info| (info.model.provider_id(), info.model.id()))
+            .collect();
 
         let mut other_by_provider: IndexMap<_, Vec<ModelInfo>> = IndexMap::default();
         for model in other {
-            if recommended_ids.contains(&model.model.id()) {
+            if recommended_set.contains(&(model.model.provider_id(), model.model.id())) {
                 continue;
             }
 
@@ -351,6 +354,20 @@ impl GroupedModels {
     fn entries(&self) -> Vec<LanguageModelPickerEntry> {
         let mut entries = Vec::new();
 
+        // Add TensorZero models first
+        if let Some(tensorzero_models) = self.other.get(&LanguageModelProviderId("tensorzero".into())) {
+            if !tensorzero_models.is_empty() {
+                entries.push(LanguageModelPickerEntry::Separator(
+                    tensorzero_models[0].model.provider_name().0,
+                ));
+                entries.extend(
+                    tensorzero_models
+                        .iter()
+                        .map(|info| LanguageModelPickerEntry::Model(info.clone())),
+                );
+            }
+        }
+
         if !self.recommended.is_empty() {
             entries.push(LanguageModelPickerEntry::Separator("Recommended".into()));
             entries.extend(
@@ -360,7 +377,12 @@ impl GroupedModels {
             );
         }
 
-        for models in self.other.values() {
+        for (provider_id, models) in &self.other {
+            // Skip TensorZero since we already added it at the top
+            if provider_id == &LanguageModelProviderId("tensorzero".into()) {
+                continue;
+            }
+            
             if models.is_empty() {
                 continue;
             }
@@ -916,5 +938,28 @@ mod tests {
 
         // Recommended models should not appear in "other"
         assert_models_eq(actual_other_models, vec!["zed/gemini", "copilot/o3"]);
+    }
+
+    #[gpui::test]
+    fn test_same_model_name_different_providers(_cx: &mut TestAppContext) {
+        // Test that models with the same name from different providers are treated as distinct
+        let recommended_models = create_models(vec![("anthropic", "claude-sonnet-4")]);
+        let all_models = create_models(vec![
+            ("anthropic", "claude-sonnet-4"), // Should be filtered out from "other"
+            ("copilot_chat", "claude-sonnet-4"), // Should NOT be filtered out - different provider
+            ("anthropic", "claude-haiku"),
+        ]);
+
+        let grouped_models = GroupedModels::new(all_models, recommended_models);
+
+        let actual_other_models = grouped_models
+            .other
+            .values()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        // Only the exact same provider+model should be filtered out
+        assert_models_eq(actual_other_models, vec!["copilot_chat/claude-sonnet-4", "anthropic/claude-haiku"]);
     }
 }

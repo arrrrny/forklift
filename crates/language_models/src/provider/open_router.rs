@@ -12,7 +12,7 @@ use language_model::{
     LanguageModelId, LanguageModelName, LanguageModelProvider, LanguageModelProviderId,
     LanguageModelProviderName, LanguageModelProviderState, LanguageModelRequest,
     LanguageModelToolChoice, LanguageModelToolResultContent, LanguageModelToolUse, MessageContent,
-    RateLimiter, Role, StopReason, WrappedTextContent,
+    RateLimiter, Role, StopReason,
 };
 use open_router::{Model, ResponseStreamEvent, list_models, stream_completion};
 use schemars::JsonSchema;
@@ -40,9 +40,13 @@ pub struct OpenRouterSettings {
 pub struct AvailableModel {
     pub name: String,
     pub display_name: Option<String>,
-    pub max_tokens: usize,
+    pub max_tokens: Option<usize>,
     pub max_output_tokens: Option<u32>,
     pub max_completion_tokens: Option<u32>,
+    #[serde(default)]
+    pub supports_tools: Option<bool>,
+    #[serde(default)]
+    pub recommended: Option<bool>,
 }
 
 pub struct OpenRouterLanguageModelProvider {
@@ -226,8 +230,8 @@ impl LanguageModelProvider for OpenRouterLanguageModelProvider {
             settings_models.push(open_router::Model {
                 name: model.name.clone(),
                 display_name: model.display_name.clone(),
-                max_tokens: model.max_tokens,
-                supports_tools: Some(false),
+                max_tokens: model.max_tokens.unwrap_or(2000000),
+                supports_tools: model.supports_tools,
             });
         }
 
@@ -246,6 +250,47 @@ impl LanguageModelProvider for OpenRouterLanguageModelProvider {
             .into_iter()
             .map(|model| self.create_language_model(model))
             .collect()
+    }
+
+    fn recommended_models(&self, cx: &App) -> Vec<Arc<dyn LanguageModel>> {
+        let settings = &AllLanguageModelSettings::get_global(cx).open_router;
+        let fetched_models = self.state.read(cx).available_models.clone();
+        
+        // Start with default models
+        let mut recommended = vec![
+            self.create_language_model(open_router::Model::default()),
+        ];
+        
+        // Add any models marked as recommended in settings
+        for settings_model in &settings.available_models {
+            if settings_model.recommended.unwrap_or(false) {
+                // Try to find the fetched model data first
+                if let Some(fetched_model) = fetched_models.iter().find(|m| m.name == settings_model.name) {
+                    // Use fetched model as base and override with settings
+                    let mut model = fetched_model.clone();
+                    if let Some(display_name) = &settings_model.display_name {
+                        model.display_name = Some(display_name.clone());
+                    }
+                    if let Some(max_tokens) = settings_model.max_tokens {
+                        model.max_tokens = max_tokens;
+                    }
+                    if let Some(supports_tools) = settings_model.supports_tools {
+                        model.supports_tools = Some(supports_tools);
+                    }
+                    recommended.push(self.create_language_model(model));
+                } else {
+                    // Model not found in fetched data, create from settings
+                    recommended.push(self.create_language_model(open_router::Model {
+                        name: settings_model.name.clone(),
+                        display_name: settings_model.display_name.clone(),
+                        max_tokens: settings_model.max_tokens.unwrap_or(2000000),
+                        supports_tools: settings_model.supports_tools,
+                    }));
+                }
+            }
+        }
+        
+        recommended
     }
 
     fn is_authenticated(&self, cx: &App) -> bool {
@@ -321,7 +366,7 @@ impl LanguageModel for OpenRouterLanguageModel {
     }
 
     fn supports_tools(&self) -> bool {
-        self.model.supports_tool_calls()
+        self.model.supports_tools.unwrap_or(false)
     }
 
     fn telemetry_id(&self) -> String {
@@ -424,11 +469,7 @@ pub fn into_open_router(
                 }
                 MessageContent::ToolResult(tool_result) => {
                     let content = match &tool_result.content {
-                        LanguageModelToolResultContent::Text(text)
-                        | LanguageModelToolResultContent::WrappedText(WrappedTextContent {
-                            text,
-                            ..
-                        }) => {
+                        LanguageModelToolResultContent::Text(text) => {
                           text.to_string()
                         }
                         LanguageModelToolResultContent::Image(_) => {
