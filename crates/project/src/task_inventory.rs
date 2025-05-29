@@ -14,7 +14,7 @@ use dap::DapRegistry;
 use gpui::{App, AppContext as _, Entity, SharedString, Task};
 use itertools::Itertools;
 use language::{
-    Buffer, ContextProvider, File, Language, LanguageToolchainStore, Location,
+    Buffer, ContextLocation, ContextProvider, File, Language, LanguageToolchainStore, Location,
     language_settings::language_settings,
 };
 use lsp::{LanguageServerId, LanguageServerName};
@@ -791,11 +791,12 @@ impl ContextProvider for BasicContextProvider {
     fn build_context(
         &self,
         _: &TaskVariables,
-        location: &Location,
+        location: ContextLocation<'_>,
         _: Option<HashMap<String, String>>,
         _: Arc<dyn LanguageToolchainStore>,
         cx: &mut App,
     ) -> Task<Result<TaskVariables>> {
+        let location = location.file_location;
         let buffer = location.buffer.read(cx);
         let buffer_snapshot = buffer.snapshot();
         let symbols = buffer_snapshot.symbols_containing(location.range.start, None);
@@ -847,11 +848,21 @@ impl ContextProvider for BasicContextProvider {
             );
             if let Some(full_path) = current_file.as_ref() {
                 let relative_path = pathdiff::diff_paths(full_path, worktree_path);
-                if let Some(relative_path) = relative_path {
+                if let Some(relative_file) = relative_path {
                     task_variables.insert(
                         VariableName::RelativeFile,
-                        relative_path.to_sanitized_string(),
+                        relative_file.to_sanitized_string(),
                     );
+                    if let Some(relative_dir) = relative_file.parent() {
+                        task_variables.insert(
+                            VariableName::RelativeDir,
+                            if relative_dir.as_os_str().is_empty() {
+                                String::from(".")
+                            } else {
+                                relative_dir.to_sanitized_string()
+                            },
+                        );
+                    }
                 }
             }
         }
