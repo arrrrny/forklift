@@ -1,6 +1,5 @@
-use crate::ToggleBurnMode;
 use gpui::{Context, FontWeight, IntoElement, Render, Window};
-use ui::{KeyBinding, prelude::*, tooltip_container};
+use ui::{prelude::*, tooltip_container};
 
 pub struct MaxModeTooltip {
     selected: bool,
@@ -45,17 +44,9 @@ impl Render for MaxModeTooltip {
             .child(Label::new("Burn Mode"))
             .when(self.selected, |title| title.child(turned_on));
 
-        let keybinding = KeyBinding::for_action(&ToggleBurnMode, window, cx)
-            .map(|kb| kb.size(rems_from_px(12.)));
-
         tooltip_container(window, cx, |this, _, _| {
             this
-                .child(
-                    h_flex()
-                        .justify_between()
-                        .child(title)
-                        .children(keybinding)
-                )
+                .child(title)
                 .child(
                     div()
                         .max_w_64()
