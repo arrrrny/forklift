@@ -68,7 +68,8 @@ pub async fn extract_zip<R: AsyncRead + Unpin>(destination: &Path, reader: R) ->
     let destination = &destination
         .canonicalize()
         .unwrap_or_else(|_| destination.to_path_buf());
-    for (i, entry) in reader.file().entries().to_vec().into_iter().enumerate() {
+    let entries: Vec<_> = reader.file().entries().to_vec();
+    for (i, entry) in entries.into_iter().enumerate() {
         let path = destination.join(
             entry
                 .filename()

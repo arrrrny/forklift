@@ -3,8 +3,8 @@ use anyhow::{Result, anyhow};
 use assistant_tool::{ActionLog, Tool, ToolResult};
 use gpui::AnyWindowHandle;
 use gpui::{App, Entity, Task};
-use language_model::LanguageModelRequestMessage;
-use language_model::LanguageModelToolSchemaFormat;
+
+use language_model::{LanguageModel, LanguageModelRequest, LanguageModelToolSchemaFormat};
 use project::Project;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -113,9 +113,7 @@ impl Tool for CreateFileTool {
                 .await
                 .map_err(|err| anyhow!("Unable to save buffer for {destination_path}: {err}"))?;
 
-            Ok(assistant_tool::ToolResultOutput::Text(format!(
-                "Created file {destination_path}"
-            )))
+            Ok(format!("Created file {destination_path}").into())
         })
         .into()
     }

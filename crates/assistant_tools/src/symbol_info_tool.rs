@@ -1,17 +1,16 @@
 use anyhow::{Context as _, Result, anyhow};
-use assistant_tool::ToolResult;
-use assistant_tool::{ActionLog, Tool};
-use gpui::AnyWindowHandle;
-use gpui::{App, AsyncApp, Entity, Task};
+use assistant_tool::{ActionLog, Tool, ToolResult};
+use gpui::{AnyWindowHandle, App, AsyncApp, Entity, Task};
 use language::{self, Anchor, Buffer, BufferSnapshot, Location, Point, ToPoint, ToPointUtf16};
-use language_model::LanguageModelRequestMessage;
-use language_model::{LanguageModel, LanguageModelRequest};
+use language_model::{LanguageModel, LanguageModelRequest, LanguageModelToolSchemaFormat};
 use project::Project;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Write, ops::Range, sync::Arc};
 use ui::IconName;
-use util::markdown::MarkdownString;
+use util::markdown::MarkdownInlineCode;
+
+use crate::schema::json_schema_for;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SymbolInfoToolInput {
@@ -47,7 +46,7 @@ impl Tool for SymbolInfoTool {
         "symbol-info".into()
     }
 
-    fn needs_confirmation(&self) -> bool {
+    fn needs_confirmation(&self, _input: &serde_json::Value, _cx: &App) -> bool {
         false
     }
 
@@ -59,15 +58,14 @@ impl Tool for SymbolInfoTool {
         IconName::Eye
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        let schema = schemars::schema_for!(SymbolInfoToolInput);
-        serde_json::to_value(&schema).unwrap()
+    fn input_schema(&self, format: LanguageModelToolSchemaFormat) -> Result<serde_json::Value> {
+        json_schema_for::<SymbolInfoToolInput>(format)
     }
 
     fn ui_text(&self, input: &serde_json::Value) -> String {
         match serde_json::from_value::<SymbolInfoToolInput>(input.clone()) {
             Ok(input) => {
-                let symbol = MarkdownString::inline_code(&input.symbol);
+                let symbol = MarkdownInlineCode(&input.symbol);
 
                 match input.command {
                     Info::Definition => {
@@ -94,17 +92,19 @@ impl Tool for SymbolInfoTool {
     fn run(
         self: Arc<Self>,
         input: serde_json::Value,
-        _messages: &[LanguageModelRequestMessage],
+        _request: Arc<LanguageModelRequest>,
         project: Entity<Project>,
         action_log: Entity<ActionLog>,
+        _model: Arc<dyn LanguageModel>,
+        _window: Option<AnyWindowHandle>,
         cx: &mut App,
-    ) -> Task<Result<String>> {
+    ) -> ToolResult {
         let input = match serde_json::from_value::<SymbolInfoToolInput>(input) {
             Ok(input) => input,
-            Err(err) => return Task::ready(Err(anyhow!(err))),
+            Err(err) => return Task::ready(Err(anyhow!(err))).into(),
         };
 
-        cx.spawn(async move |cx| {
+        cx.spawn(async move |cx| -> Result<assistant_tool::ToolResultOutput> {
             let buffer = {
                 let project_path = project.read_with(cx, |project, cx| {
                     project
@@ -179,9 +179,10 @@ impl Tool for SymbolInfoTool {
             if output.is_empty() {
                 Err(anyhow!("None found."))
             } else {
-                Ok(output)
+                Ok(output.into())
             }
         })
+        .into()
     }
 }
 

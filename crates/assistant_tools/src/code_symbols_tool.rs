@@ -3,23 +3,24 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use assistant_tool::{ActionLog, Tool};
+use assistant_tool::{ActionLog, Tool, ToolResult};
 use collections::IndexMap;
-use gpui::{App, AsyncApp, Entity, Task};
+use gpui::{AnyWindowHandle, App, AsyncApp, Entity, Task};
 use language::{CodeLabel, Language, LanguageRegistry};
-use language_model::LanguageModelRequestMessage;
+use language_model::{LanguageModel, LanguageModelRequest, LanguageModelToolSchemaFormat};
 use lsp::SymbolKind;
 use project::{DocumentSymbol, Project, Symbol};
 use regex::{Regex, RegexBuilder};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ui::IconName;
-use util::markdown::MarkdownString;
+use util::markdown::MarkdownInlineCode;
 
-use crate::code_symbol_iter::{CodeSymbolIterator, Entry};
+// Inline simple symbol iteration instead of missing code_symbol_iter module
+use crate::schema::json_schema_for;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct CodeSymbolsInput {
+pub struct CodeSymbolsToolInput {
     #[serde(default)]
     pub path: Option<String>,
 
@@ -33,7 +34,7 @@ pub struct CodeSymbolsInput {
     pub offset: u32,
 }
 
-impl CodeSymbolsInput {
+impl CodeSymbolsToolInput {
     pub fn page(&self) -> u32 {
         1 + (self.offset / RESULTS_PER_PAGE)
     }
@@ -48,7 +49,7 @@ impl Tool for CodeSymbolsTool {
         "code-symbols".into()
     }
 
-    fn needs_confirmation(&self) -> bool {
+    fn needs_confirmation(&self, _input: &serde_json::Value, _cx: &App) -> bool {
         false
     }
 
@@ -60,19 +61,18 @@ impl Tool for CodeSymbolsTool {
         IconName::Eye
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        let schema = schemars::schema_for!(CodeSymbolsInput);
-        serde_json::to_value(&schema).unwrap()
+    fn input_schema(&self, format: LanguageModelToolSchemaFormat) -> Result<serde_json::Value> {
+        json_schema_for::<CodeSymbolsToolInput>(format)
     }
 
     fn ui_text(&self, input: &serde_json::Value) -> String {
-        match serde_json::from_value::<CodeSymbolsInput>(input.clone()) {
+        match serde_json::from_value::<CodeSymbolsToolInput>(input.clone()) {
             Ok(input) => {
                 let page = input.page();
 
                 match &input.path {
                     Some(path) => {
-                        let path = MarkdownString::inline_code(path);
+                        let path = MarkdownInlineCode(path);
                         if page > 1 {
                             format!("List page {page} of code symbols for {path}")
                         } else {
@@ -95,14 +95,16 @@ impl Tool for CodeSymbolsTool {
     fn run(
         self: Arc<Self>,
         input: serde_json::Value,
-        _messages: &[LanguageModelRequestMessage],
+        _request: Arc<LanguageModelRequest>,
         project: Entity<Project>,
         action_log: Entity<ActionLog>,
+        _model: Arc<dyn LanguageModel>,
+        _window: Option<AnyWindowHandle>,
         cx: &mut App,
-    ) -> Task<Result<String>> {
-        let input = match serde_json::from_value::<CodeSymbolsInput>(input) {
+    ) -> ToolResult {
+        let input = match serde_json::from_value::<CodeSymbolsToolInput>(input) {
             Ok(input) => input,
-            Err(err) => return Task::ready(Err(anyhow!(err))),
+            Err(err) => return Task::ready(Err(anyhow!(err))).into(),
         };
 
         let regex = match input.regex {
@@ -111,15 +113,23 @@ impl Tool for CodeSymbolsTool {
                 .build()
             {
                 Ok(regex) => Some(regex),
-                Err(err) => return Task::ready(Err(anyhow!("Invalid regex: {err}"))),
+                Err(err) => return Task::ready(Err(anyhow!("Invalid regex: {err}"))).into(),
             },
             None => None,
         };
 
-        cx.spawn(async move |cx| match input.path {
-            Some(path) => file_outline(project, path, action_log, regex, input.offset, cx).await,
-            None => project_symbols(project, regex, input.offset, cx).await,
-        })
+        cx.spawn(
+            async move |cx| -> Result<assistant_tool::ToolResultOutput> {
+                let result = match input.path {
+                    Some(path) => {
+                        file_outline(project, path, action_log, regex, input.offset, cx).await
+                    }
+                    None => project_symbols(project, regex, input.offset, cx).await,
+                }?;
+                Ok(result.into())
+            },
+        )
+        .into()
     }
 }
 
@@ -266,11 +276,20 @@ async fn render_outline(
     offset: u32,
 ) -> Result<String> {
     const RESULTS_PER_PAGE_USIZE: usize = RESULTS_PER_PAGE as usize;
-    let entries = CodeSymbolIterator::new(symbols, regex.clone())
+
+    // Flatten symbols recursively and filter by regex
+    let mut flat_symbols = Vec::new();
+    flatten_symbols(symbols, &mut flat_symbols, 0);
+
+    if let Some(ref regex) = regex {
+        flat_symbols.retain(|symbol| regex.is_match(&symbol.name));
+    }
+
+    let entries: Vec<_> = flat_symbols
+        .into_iter()
         .skip(offset as usize)
-        // Take 1 more than RESULTS_PER_PAGE so we can tell if there are more results.
         .take(RESULTS_PER_PAGE_USIZE.saturating_add(1))
-        .collect::<Vec<Entry>>();
+        .collect();
     let has_more = entries.len() > RESULTS_PER_PAGE_USIZE;
 
     // Get language-specific labels, if available
@@ -279,7 +298,7 @@ async fn render_outline(
             let entries_for_labels: Vec<(String, SymbolKind)> = entries
                 .iter()
                 .take(RESULTS_PER_PAGE_USIZE)
-                .map(|entry| (entry.name.clone(), entry.kind))
+                .map(|symbol| (symbol.name.clone(), symbol.kind))
                 .collect();
 
             let lang_name = lang.name();
@@ -301,7 +320,7 @@ async fn render_outline(
         Some(label_list) => render_entries(
             &mut output,
             entries
-                .into_iter()
+                .iter()
                 .take(RESULTS_PER_PAGE_USIZE)
                 .zip(label_list.iter())
                 .map(|(entry, label)| (entry, label.as_ref())),
@@ -309,7 +328,7 @@ async fn render_outline(
         None => render_entries(
             &mut output,
             entries
-                .into_iter()
+                .iter()
                 .take(RESULTS_PER_PAGE_USIZE)
                 .map(|entry| (entry, None)),
         ),
@@ -339,31 +358,35 @@ async fn render_outline(
     Ok(output)
 }
 
+fn flatten_symbols(symbols: &[DocumentSymbol], output: &mut Vec<DocumentSymbol>, _depth: usize) {
+    for symbol in symbols {
+        output.push(symbol.clone());
+        if !symbol.children.is_empty() {
+            flatten_symbols(&symbol.children, output, _depth + 1);
+        }
+    }
+}
+
 fn render_entries<'a>(
     output: &mut String,
-    entries: impl IntoIterator<Item = (Entry, Option<&'a CodeLabel>)>,
+    entries: impl IntoIterator<Item = (&'a DocumentSymbol, Option<&'a CodeLabel>)>,
 ) -> u32 {
     let mut entries_rendered = 0;
 
-    for (entry, label) in entries {
-        // Indent based on depth ("" for level 0, "  " for level 1, etc.)
-        for _ in 0..entry.depth {
-            output.push_str("  ");
-        }
-
+    for (symbol, label) in entries {
         match label {
             Some(label) => {
                 output.push_str(label.text());
             }
             None => {
-                write_symbol_kind(output, entry.kind).ok();
-                output.push_str(&entry.name);
+                write_symbol_kind(output, symbol.kind).ok();
+                output.push_str(&symbol.name);
             }
         }
 
         // Add position information - convert to 1-based line numbers for display
-        let start_line = entry.start_line + 1;
-        let end_line = entry.end_line + 1;
+        let start_line = symbol.range.start.0.row as usize + 1;
+        let end_line = symbol.range.end.0.row as usize + 1;
 
         if start_line == end_line {
             writeln!(output, " [L{}]", start_line).ok();

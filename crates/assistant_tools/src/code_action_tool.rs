@@ -1,8 +1,8 @@
 use anyhow::{Context as _, Result, anyhow};
-use assistant_tool::{ActionLog, Tool, ToolResultOutput};
-use gpui::{App, Entity, Task};
+use assistant_tool::{ActionLog, Tool};
+use gpui::{AnyWindowHandle, App, Entity, Task};
 use language::{self, Anchor, Buffer, ToPointUtf16};
-use language_model::LanguageModelRequestMessage;
+use language_model::{LanguageModel, LanguageModelRequest};
 use project::{self, LspAction, Project};
 use regex::Regex;
 use schemars::JsonSchema;
@@ -49,7 +49,7 @@ impl Tool for CodeActionTool {
     fn input_schema(
         &self,
         format: language_model::LanguageModelToolSchemaFormat,
-    ) -> serde_json::Value {
+    ) -> Result<serde_json::Value> {
         json_schema_for::<CodeActionToolInput>(format)
     }
 
@@ -89,17 +89,19 @@ impl Tool for CodeActionTool {
     fn run(
         self: Arc<Self>,
         input: serde_json::Value,
-        _messages: &[LanguageModelRequestMessage],
+        _request: Arc<LanguageModelRequest>,
         project: Entity<Project>,
         action_log: Entity<ActionLog>,
+        _model: Arc<dyn LanguageModel>,
+        _window: Option<AnyWindowHandle>,
         cx: &mut App,
-    ) -> Task<Result<ToolResultOutput>> {
+    ) -> assistant_tool::ToolResult {
         let input = match serde_json::from_value::<CodeActionToolInput>(input) {
             Ok(input) => input,
-            Err(err) => return Task::ready(Err(anyhow!(err))),
+            Err(err) => return Task::ready(Err(anyhow!(err))).into(),
         };
 
-        cx.spawn(async move |cx| {
+        cx.spawn(async move |cx| -> Result<assistant_tool::ToolResultOutput> {
             let buffer = {
                 let project_path = project.read_with(cx, |project, cx| {
                     project
@@ -199,7 +201,7 @@ impl Tool for CodeActionTool {
                     log.buffer_edited(buffer.clone(), cx)
                 })?;
 
-                Ok(ToolResultOutput::Text(response_text))
+                Ok(response_text.into())
             } else {
                 // No action specified, so list the available ones.
                 let (position_start, position_end) = buffer.read_with(cx, |buffer, _| {
@@ -267,7 +269,7 @@ impl Tool for CodeActionTool {
                     }
                 }
 
-                Ok(ToolResultOutput::Text(response))
+                Ok(response.into())
             }
         })
         .into()
