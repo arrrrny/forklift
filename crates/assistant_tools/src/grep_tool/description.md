@@ -1,8 +1,13 @@
-Searches the contents of files in the project with a regular expression
+Searches the contents of files in the project using a regular expression.
 
-- Prefer this tool to path search when searching for symbols in the project, because you won't need to guess what path it's in.
-- Supports full regex syntax (eg. "log.*Error", "function\\s+\\w+", etc.)
-- Pass an `include_pattern` if you know how to narrow your search on the files system
-- Never use this tool to search for paths. Only search file contents with this tool.
-- Use this tool when you need to find files containing specific patterns
-- Results are paginated with 20 matches per page. Use the optional 'offset' parameter to request subsequent pages.
+**Input Fields**:
+1. Regex (Required): The pattern to search for within file contents. Supports full regex syntax such as log.*Error or function\\\\s+\\\\w+.
+2. Include Pattern (Optional): Glob pattern to narrow the search to specific files or directories, for example **/*.rs for Rust files.
+3. Offset (Optional): Starting position for paginated results, starting at zero by default.
+4. Case Sensitive (Optional): Flag to enable case-sensitive matching, false by default.
+
+**Usage**:
+Use this tool to locate specific patterns in file contents, such as function definitions or error logs. Prefer this tool over path search when searching for symbols, as it directly scans file contents. Results are paginated with 20 matches per page. Use the offset parameter to navigate pages.
+
+**Examples**:
+To find all occurrences of Error in Rust files, search using Regex Error and Include Pattern for Rust files. To perform a case-sensitive search for TODO, enable Case Sensitive and search using Regex TODO.

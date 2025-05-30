@@ -1,5 +1,9 @@
+mod batch_tool;
+mod code_action_tool;
+mod code_symbols_tool;
 mod copy_path_tool;
 mod create_directory_tool;
+mod create_file_tool;
 mod delete_path_tool;
 mod diagnostics_tool;
 mod edit_agent;
@@ -13,6 +17,7 @@ mod now_tool;
 mod open_tool;
 mod read_file_tool;
 mod schema;
+mod symbol_info_tool;
 mod templates;
 mod terminal_tool;
 mod thinking_tool;
@@ -22,16 +27,21 @@ mod web_search_tool;
 use std::sync::Arc;
 
 use assistant_tool::ToolRegistry;
+use batch_tool::BatchTool;
+use code_action_tool::CodeActionTool;
+use code_symbols_tool::CodeSymbolsTool;
 use copy_path_tool::CopyPathTool;
 use gpui::{App, Entity};
 use http_client::HttpClientWithUrl;
 use language_model::LanguageModelRegistry;
 use move_path_tool::MovePathTool;
+use symbol_info_tool::SymbolInfoTool;
 use web_search_tool::WebSearchTool;
 
 pub(crate) use templates::*;
 
 use crate::create_directory_tool::CreateDirectoryTool;
+use crate::create_file_tool::CreateFileTool;
 use crate::delete_path_tool::DeletePathTool;
 use crate::diagnostics_tool::DiagnosticsTool;
 use crate::edit_file_tool::EditFileTool;
@@ -54,6 +64,7 @@ pub fn init(http_client: Arc<HttpClientWithUrl>, cx: &mut App) {
     let registry = ToolRegistry::global(cx);
     registry.register_tool(TerminalTool::new(cx));
     registry.register_tool(CreateDirectoryTool);
+    registry.register_tool(CreateFileTool);
     registry.register_tool(CopyPathTool);
     registry.register_tool(DeletePathTool);
     registry.register_tool(MovePathTool);
@@ -65,6 +76,10 @@ pub fn init(http_client: Arc<HttpClientWithUrl>, cx: &mut App) {
     registry.register_tool(ReadFileTool);
     registry.register_tool(GrepTool);
     registry.register_tool(ThinkingTool);
+    registry.register_tool(BatchTool);
+    registry.register_tool(CodeActionTool);
+    registry.register_tool(CodeSymbolsTool);
+    registry.register_tool(SymbolInfoTool);
     registry.register_tool(FetchTool::new(http_client));
     registry.register_tool(EditFileTool);
 

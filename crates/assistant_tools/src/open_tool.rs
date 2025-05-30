@@ -12,7 +12,6 @@ use util::markdown::MarkdownEscaped;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct OpenToolInput {
-    /// The path or URL to open with the default application.
     path_or_url: String,
 }
 

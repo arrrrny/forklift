@@ -21,7 +21,6 @@ use zed_llm_client::{WebSearchResponse, WebSearchResult};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct WebSearchToolInput {
-    /// The search term or question to query on the web.
     query: String,
 }
 

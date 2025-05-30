@@ -1,21 +1,24 @@
-Get errors and warnings for the project or a specific file.
+This tool identifies errors and warnings in the codebase, either for a specific file or the entire project.
 
-This tool can be invoked after a series of edits to determine if further edits are necessary, or if the user asks to fix errors or warnings in their codebase.
+**Required Fields**:
+1. Path: The relative path of the file to get diagnostics for. If omitted, the tool will return a summary of error and warning counts for all files in the project.
 
-When a path is provided, shows all diagnostics for that specific file.
-When no path is provided, shows a summary of error and warning counts for all files in the project.
+**Optional Fields**:
+- None.
 
-<example>
-To get diagnostics for a specific file:
-{
-    "path": "src/main.rs"
-}
+**Usage**:
+1. Provide a file path to get diagnostics for that specific file.
+2. Omit the file path to get a summary of error and warning counts for all files in the project.
 
-To get a project-wide diagnostic summary:
-{}
-</example>
+**Examples**:
+1. File Diagnostics:
+   - Input: path: src/main.rs
+   - Output: Detailed errors and warnings for src/main.rs.
 
-<guidelines>
-- If you think you can fix a diagnostic, make 1-2 attempts and then give up.
-- Don't remove code you've generated just because you can't fix an error. The user can help you fix it.
-</guidelines>
+2. Project Diagnostics:
+   - Input: none
+   - Output: Summary of error and warning counts across all files.
+
+**Guidelines**:
+1. Attempt to fix diagnostics up to two times. If unresolved, seek user assistance.
+2. Avoid removing generated code solely to resolve diagnostics. Collaborate with the user for solutions.

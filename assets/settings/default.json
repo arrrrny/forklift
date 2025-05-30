@@ -789,7 +789,13 @@
           "grep": true,
           "terminal": true,
           "thinking": true,
-          "web_search": true
+          "web_search": true,
+          "batch_tool": true,
+          "code_action_tool": true,
+          "code_symbols_tool": true,
+          "open_tool": true,
+          "rename_tool": true,
+          "symbol_info_tool": true
         }
       },
       "ask": {

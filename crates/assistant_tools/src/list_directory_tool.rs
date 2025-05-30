@@ -12,28 +12,6 @@ use util::markdown::MarkdownInlineCode;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ListDirectoryToolInput {
-    /// The fully-qualified path of the directory to list in the project.
-    ///
-    /// This path should never be absolute, and the first component
-    /// of the path should always be a root directory in a project.
-    ///
-    /// <example>
-    /// If the project has the following root directories:
-    ///
-    /// - directory1
-    /// - directory2
-    ///
-    /// You can list the contents of `directory1` by using the path `directory1`.
-    /// </example>
-    ///
-    /// <example>
-    /// If the project has the following root directories:
-    ///
-    /// - foo
-    /// - bar
-    ///
-    /// If you wanna list contents in the directory `foo/baz`, you should use the path `foo/baz`.
-    /// </example>
     pub path: String,
 }
 

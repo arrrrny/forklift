@@ -1,11 +1,15 @@
 Executes a shell one-liner and returns the combined output.
 
-This tool spawns a process using the user's shell, reads from stdout and stderr (preserving the order of writes), and returns a string with the combined output result.
+**Input Fields**:
+1. Command (Required): The shell command to execute. This must be a single-line command that terminates on its own. Avoid commands that run indefinitely, such as servers or file watchers.
+2. CD (Required): The working directory for the command. Specify one of the project's root directories. Do not include directory navigation in the command itself.
 
-The output results will be shown to the user already, only list it again if necessary, avoid being redundant.
+**Behavior**:
+- Spawns a process using the user's shell and captures both stdout and stderr, preserving the order of writes.
+- Returns a string with the combined output result.
+- Each invocation is isolated; no state is preserved between calls.
 
-Make sure you use the `cd` parameter to navigate to one of the root directories of the project. NEVER do it as part of the `command` itself, otherwise it will error.
-
-Do not use this tool for commands that run indefinitely, such as servers (like `npm run start`, `npm run dev`, `python -m http.server`, etc) or file watchers that don't terminate on their own.
-
-Remember that each invocation of this tool will spawn a new shell process, so you can't rely on any state from previous invocations.
+**Usage Guidelines**:
+- Avoid redundancy by not listing output already shown to the user.
+- Ensure the CD parameter is used for directory navigation; commands with embedded navigation will fail.
+- Do not use this tool for commands that run indefinitely, such as npm run start or python -m http.server.

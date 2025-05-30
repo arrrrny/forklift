@@ -1,9 +1,16 @@
-This tool opens a file or URL with the default application associated with it on the user's operating system:
-- On macOS, it's equivalent to the `open` command
-- On Windows, it's equivalent to `start`
-- On Linux, it uses something like `xdg-open`, `gio open`, `gnome-open`, `kde-open`, `wslview` as appropriate
+This tool opens a file or URL using the default application on the user's operating system. It supports various platforms:
+- macOS: Uses the open command.
+- Windows: Uses the start command.
+- Linux: Uses commands like xdg-open, gio open, gnome-open, kde-open, or wslview.
 
-For example, it can open a web browser with a URL, open a PDF file with the default PDF viewer, etc.
+**Input Fields**:
+1. path_or_url (Required): Represents the file path or URL to open. For example:
+   - To open a web browser with a URL, provide https://example.com.
+   - To open a PDF file, provide the file path, such as documents/report.pdf.
 
-You MUST ONLY use this tool when the user has explicitly requested opening something. You MUST NEVER assume that
-the user would like for you to use this tool.
+**Usage Guidelines**:
+- Use this tool only when explicitly requested by the user.
+- Ensure the path_or_url field is valid and accessible within the user's environment.
+- Do not assume the user wants something opened without their instruction.
+
+This tool is ideal for opening files or URLs in their associated applications, ensuring seamless integration with the user's environment.
