@@ -195,7 +195,7 @@ pub struct LmStudioSettingsContent {
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
-pub struct DeepseekSettingsContent {
+pub struct DeepSeekSettingsContent {
     pub api_url: Option<String>,
     pub available_models: Option<Vec<provider::deepseek::AvailableModel>>,
 }
