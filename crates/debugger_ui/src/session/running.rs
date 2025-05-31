@@ -173,6 +173,10 @@ impl Item for SubView {
         self.kind.to_shared_string()
     }
 
+    fn tab_tooltip_text(&self, _: &App) -> Option<SharedString> {
+        Some(self.kind.tab_tooltip())
+    }
+
     fn tab_content(
         &self,
         params: workspace::item::TabContentParams,
@@ -399,6 +403,9 @@ pub(crate) fn new_debugger_pane(
                                     .p_1()
                                     .rounded_md()
                                     .cursor_pointer()
+                                    .when_some(item.tab_tooltip_text(cx), |this, tooltip| {
+                                        this.tooltip(Tooltip::text(tooltip))
+                                    })
                                     .map(|this| {
                                         let theme = cx.theme();
                                         if selected {
@@ -805,7 +812,7 @@ impl RunningState {
             let request_type = dap_registry
                 .adapter(&adapter)
                 .ok_or_else(|| anyhow!("{}: is not a valid adapter name", &adapter))
-                .and_then(|adapter| adapter.validate_config(&config));
+                .and_then(|adapter| adapter.request_kind(&config));
 
             let config_is_valid = request_type.is_ok();
 
@@ -874,7 +881,6 @@ impl RunningState {
                     args,
                     ..task.resolved.clone()
                 };
-
                 let terminal = project
                     .update_in(cx, |project, window, cx| {
                         project.create_terminal(
@@ -919,6 +925,12 @@ impl RunningState {
             };
 
             if config_is_valid {
+                // Ok(DebugTaskDefinition {
+                //     label,
+                //     adapter: DebugAdapterName(adapter),
+                //     config,
+                //     tcp_connection,
+                // })
             } else if let Some((task, locator_name)) = build_output {
                 let locator_name =
                     locator_name.context("Could not find a valid locator for a build task")?;
@@ -937,12 +949,15 @@ impl RunningState {
 
                 let scenario = dap_registry
                     .adapter(&adapter)
-                    .context(format!("{}: is not a valid adapter name", &adapter))
+                    .ok_or_else(|| anyhow!("{}: is not a valid adapter name", &adapter))
                     .map(|adapter| adapter.config_from_zed_format(zed_config))??;
                 config = scenario.config;
                 Self::substitute_variables_in_config(&mut config, &task_context);
             } else {
-                anyhow::bail!("No request or build provided");
+                let Err(e) = request_type else {
+                    unreachable!();
+                };
+                anyhow::bail!("Zed cannot determine how to run this debug scenario. `build` field was not provided and Debug Adapter won't accept provided configuration because: {e}");
             };
 
             Ok(DebugTaskDefinition {

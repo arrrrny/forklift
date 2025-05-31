@@ -46,53 +46,35 @@ pub fn language_model_selector(
 }
 
 fn all_models(cx: &App) -> GroupedModels {
-    let mut recommended = Vec::new();
-    let mut recommended_set = HashSet::default();
-    for provider in LanguageModelRegistry::global(cx)
-        .read(cx)
-        .providers()
+    let providers = LanguageModelRegistry::global(cx).read(cx).providers();
+
+    let recommended = providers
         .iter()
-    {
-        let models = provider.recommended_models(cx);
-        recommended_set.extend(models.iter().map(|model| (model.provider_id(), model.id())));
-        recommended.extend(
+        .flat_map(|provider| {
             provider
                 .recommended_models(cx)
                 .into_iter()
-                .map(move |model| ModelInfo {
-                    model: model.clone(),
+                .map(|model| ModelInfo {
+                    model,
                     icon: provider.icon(),
-                }),
-        );
-    }
-
-    let other_models = LanguageModelRegistry::global(cx)
-        .read(cx)
-        .providers()
-        .iter()
-        .map(|provider| {
-            (
-                provider.id(),
-                provider
-                    .provided_models(cx)
-                    .into_iter()
-                    .filter_map(|model| {
-                        let not_included =
-                            !recommended_set.contains(&(model.provider_id(), model.id()));
-                        not_included.then(|| ModelInfo {
-                            model: model.clone(),
-                            icon: provider.icon(),
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            )
+                })
         })
-        .collect::<IndexMap<_, _>>();
+        .collect();
 
-    GroupedModels {
-        recommended,
-        other: other_models,
-    }
+    let other = providers
+        .iter()
+        .flat_map(|provider| {
+            provider
+                .provided_models(cx)
+                .into_iter()
+                .map(|model| ModelInfo {
+                    model,
+                    icon: provider.icon(),
+                })
+        })
+        .collect();
+
+    GroupedModels::new(other, recommended)
 }
 
 #[derive(Clone)]
