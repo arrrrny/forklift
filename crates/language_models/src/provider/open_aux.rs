@@ -30,19 +30,10 @@ use crate::{AllLanguageModelSettings, ui::InstructionListItem};
 const PROVIDER_ID: &str = "openaux";
 const PROVIDER_NAME: &str = "OpenAux";
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct OpenAuxSettings {
     pub api_url: String,
     pub available_models: Vec<AvailableModel>,
-}
-
-impl Default for OpenAuxSettings {
-    fn default() -> Self {
-        Self {
-            api_url: open_aux::OPEN_AUX_API_URL.to_string(),
-            available_models: Vec::new(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -126,7 +117,6 @@ impl State {
             .open_aux
             .api_url
             .clone();
-
         cx.spawn(async move |this, cx| {
             let (api_key, from_env) = if let Ok(api_key) = std::env::var(OPENAUX_API_KEY_VAR) {
                 (api_key, true)
@@ -144,9 +134,9 @@ impl State {
             this.update(cx, |this, cx| {
                 this.api_key = Some(api_key);
                 this.api_key_from_env = from_env;
-                this.restart_fetch_models_task(cx);
                 cx.notify();
             })?;
+
             Ok(())
         })
     }
@@ -218,7 +208,7 @@ impl LanguageModelProvider for OpenAuxLanguageModelProvider {
     }
 
     fn icon(&self) -> IconName {
-        IconName::AiOpenAux
+        IconName::AiOpenRouter
     }
 
     fn default_model(&self, _cx: &App) -> Option<Arc<dyn LanguageModel>> {
@@ -230,6 +220,7 @@ impl LanguageModelProvider for OpenAuxLanguageModelProvider {
     }
 
     fn provided_models(&self, cx: &App) -> Vec<Arc<dyn LanguageModel>> {
+        let mut models_from_api = self.state.read(cx).available_models.clone();
         let mut settings_models = Vec::new();
 
         for model in &AllLanguageModelSettings::get_global(cx)
@@ -244,36 +235,49 @@ impl LanguageModelProvider for OpenAuxLanguageModelProvider {
             });
         }
 
-        let fetched_models = self.state.read(cx).available_models.clone();
-        let mut models = Vec::new();
-
-        for model in settings_models.into_iter().chain(fetched_models) {
-            let duplicate = models
+        for settings_model in &settings_models {
+            if let Some(pos) = models_from_api
                 .iter()
-                .any(|m: &Arc<dyn LanguageModel>| m.id().0 == model.id());
-
-            if !duplicate {
-                models.push(self.create_language_model(model));
+                .position(|m| m.name == settings_model.name)
+            {
+                models_from_api[pos] = settings_model.clone();
+            } else {
+                models_from_api.push(settings_model.clone());
             }
         }
 
-        models
+        models_from_api
+            .into_iter()
+            .map(|model| self.create_language_model(model))
+            .collect()
     }
 
     fn recommended_models(&self, cx: &App) -> Vec<Arc<dyn LanguageModel>> {
         let settings = &AllLanguageModelSettings::get_global(cx).open_aux;
         let fetched_models = self.state.read(cx).available_models.clone();
-
-        // Get recommended models from settings (no default auto model)
-        let mut recommended = vec![];
-
+        
+        // Start with default models
+        let mut recommended = vec![
+            self.create_language_model(open_aux::Model::default()),
+        ];
+        
+        // Add any models marked as recommended in settings
         for settings_model in &settings.available_models {
             if settings_model.recommended.unwrap_or(false) {
-                if let Some(fetched_model) = fetched_models
-                    .iter()
-                    .find(|m| m.id() == settings_model.name)
-                {
-                    recommended.push(self.create_language_model(fetched_model.clone()));
+                // Try to find the fetched model data first
+                if let Some(fetched_model) = fetched_models.iter().find(|m| m.name == settings_model.name) {
+                    // Use fetched model as base and override with settings
+                    let mut model = fetched_model.clone();
+                    if let Some(display_name) = &settings_model.display_name {
+                        model.display_name = Some(display_name.clone());
+                    }
+                    if let Some(max_tokens) = settings_model.max_tokens {
+                        model.max_tokens = max_tokens;
+                    }
+                    if let Some(supports_tools) = settings_model.supports_tools {
+                        model.supports_tools = Some(supports_tools);
+                    }
+                    recommended.push(self.create_language_model(model));
                 } else {
                     // Model not found in fetched data, create from settings
                     recommended.push(self.create_language_model(open_aux::Model {
@@ -285,7 +289,7 @@ impl LanguageModelProvider for OpenAuxLanguageModelProvider {
                 }
             }
         }
-
+        
         recommended
     }
 
@@ -297,7 +301,7 @@ impl LanguageModelProvider for OpenAuxLanguageModelProvider {
         self.state.update(cx, |state, cx| state.authenticate(cx))
     }
 
-    fn configuration_view(&self, window: &mut gpui::Window, cx: &mut App) -> AnyView {
+    fn configuration_view(&self, window: &mut Window, cx: &mut App) -> AnyView {
         cx.new(|cx| ConfigurationView::new(self.state.clone(), window, cx))
             .into()
     }
@@ -323,12 +327,14 @@ impl OpenAuxLanguageModel {
     ) -> BoxFuture<'static, Result<futures::stream::BoxStream<'static, Result<ResponseStreamEvent>>>>
     {
         let http_client = self.http_client.clone();
-
         let Ok((api_key, api_url)) = cx.read_entity(&self.state, |state, cx| {
             let settings = &AllLanguageModelSettings::get_global(cx).open_aux;
             (state.api_key.clone(), settings.api_url.clone())
         }) else {
-            return async move { Err(anyhow!("Failed to read state")) }.boxed();
+            return futures::future::ready(Err(anyhow!(
+                "App state dropped: Unable to read API key or API URL from the application state"
+            )))
+            .boxed();
         };
 
         let future = self.request_limiter.stream(async move {
@@ -338,7 +344,7 @@ impl OpenAuxLanguageModel {
             Ok(response)
         });
 
-        future.boxed()
+        async move { Ok(future.await?.boxed()) }.boxed()
     }
 }
 
@@ -360,7 +366,7 @@ impl LanguageModel for OpenAuxLanguageModel {
     }
 
     fn supports_tools(&self) -> bool {
-        self.model.supports_tool_calls()
+        self.model.supports_tools.unwrap_or(false)
     }
 
     fn telemetry_id(&self) -> String {
@@ -375,9 +381,11 @@ impl LanguageModel for OpenAuxLanguageModel {
         self.model.max_output_tokens()
     }
 
-    fn supports_tool_choice(&self) -> bool {
-        match self.model.id() {
-            _ => true,
+    fn supports_tool_choice(&self, choice: LanguageModelToolChoice) -> bool {
+        match choice {
+            LanguageModelToolChoice::Auto => true,
+            LanguageModelToolChoice::Any => true,
+            LanguageModelToolChoice::None => true,
         }
     }
 
@@ -465,12 +473,12 @@ pub fn into_open_aux(
                           text.to_string()
                         }
                         LanguageModelToolResultContent::Image(_) => {
-                          "[Tool responded with an image, but Zed doesn't support these in OpenAux models yet]".to_string()
+                          "[Tool responded with an image, but Zed doesn't support these in Open AI models yet]".to_string()
                         }
                     };
 
                     messages.push(open_aux::RequestMessage::Tool {
-                        content,
+                        content: content,
                         tool_call_id: tool_result.tool_use_id.to_string(),
                     });
                 }
@@ -482,9 +490,14 @@ pub fn into_open_aux(
         model: model.id().into(),
         messages,
         stream: true,
-        max_tokens: max_output_tokens,
         stop: request.stop,
-        temperature: request.temperature,
+        temperature: request.temperature.unwrap_or(0.4),
+        max_tokens: max_output_tokens,
+        parallel_tool_calls: if model.supports_parallel_tool_calls() && !request.tools.is_empty() {
+            Some(false)
+        } else {
+            None
+        },
         tools: request
             .tools
             .into_iter()
@@ -501,7 +514,6 @@ pub fn into_open_aux(
             LanguageModelToolChoice::Any => open_aux::ToolChoice::Required,
             LanguageModelToolChoice::None => open_aux::ToolChoice::None,
         }),
-        parallel_tool_calls: Some(false),
     }
 }
 
@@ -521,86 +533,88 @@ impl OpenAuxEventMapper {
         events: Pin<Box<dyn Send + Stream<Item = Result<ResponseStreamEvent>>>>,
     ) -> impl Stream<Item = Result<LanguageModelCompletionEvent, LanguageModelCompletionError>>
     {
-        events.map(move |event| self.map_event(event))
+        events.flat_map(move |event| {
+            futures::stream::iter(match event {
+                Ok(event) => self.map_event(event),
+                Err(error) => vec![Err(LanguageModelCompletionError::Other(anyhow!(error)))],
+            })
+        })
     }
 
     pub fn map_event(
         &mut self,
-        event: Result<ResponseStreamEvent>,
-    ) -> Result<LanguageModelCompletionEvent, LanguageModelCompletionError> {
-        let event = event.map_err(|error| LanguageModelCompletionError::other(error))?;
+        event: ResponseStreamEvent,
+    ) -> Vec<Result<LanguageModelCompletionEvent, LanguageModelCompletionError>> {
+        let Some(choice) = event.choices.first() else {
+            return vec![Err(LanguageModelCompletionError::Other(anyhow!(
+                "Response contained no choices"
+            )))];
+        };
 
-        if event.choices.is_empty() {
-            return Err(LanguageModelCompletionError::other(anyhow!(
-                "OpenAux response is missing choices"
-            )));
-        }
-
-        let choice = &event.choices[0];
-
-        if let Some(content) = choice.delta.content.as_ref() {
-            return Ok(LanguageModelCompletionEvent::Text(content.clone()));
+        let mut events = Vec::new();
+        if let Some(content) = choice.delta.content.clone() {
+            events.push(Ok(LanguageModelCompletionEvent::Text(content)));
         }
 
         if let Some(tool_calls) = choice.delta.tool_calls.as_ref() {
-            for tool_call_chunk in tool_calls {
-                let index = tool_call_chunk.index;
-                let raw_tool_call =
-                    self.tool_calls_by_index
-                        .entry(index)
-                        .or_insert_with(|| RawToolCall {
-                            id: String::new(),
-                            name: String::new(),
-                            arguments: String::new(),
-                        });
+            for tool_call in tool_calls {
+                let entry = self.tool_calls_by_index.entry(tool_call.index).or_default();
 
-                if let Some(id) = &tool_call_chunk.id {
-                    raw_tool_call.id = id.clone();
+                if let Some(tool_id) = tool_call.id.clone() {
+                    entry.id = tool_id;
                 }
 
-                if let Some(function) = &tool_call_chunk.function {
-                    if let Some(name) = &function.name {
-                        raw_tool_call.name.push_str(name);
+                if let Some(function) = tool_call.function.as_ref() {
+                    if let Some(name) = function.name.clone() {
+                        entry.name = name;
                     }
-                    if let Some(arguments) = &function.arguments {
-                        raw_tool_call.arguments.push_str(arguments);
+
+                    if let Some(arguments) = function.arguments.clone() {
+                        entry.arguments.push_str(&arguments);
                     }
                 }
             }
         }
 
-        if let Some(finish_reason) = choice.finish_reason.as_ref() {
-            match finish_reason.as_str() {
-                "stop" => return Ok(LanguageModelCompletionEvent::Stop(StopReason::EndTurn)),
-                "length" => return Ok(LanguageModelCompletionEvent::Stop(StopReason::MaxTokens)),
-                "tool_calls" => {
-                    for (_, raw_tool_call) in self.tool_calls_by_index.drain() {
-                        let input = serde_json::from_str(&raw_tool_call.arguments)
-                            .unwrap_or_else(|_| serde_json::Value::Null);
-                        return Ok(LanguageModelCompletionEvent::ToolUse(
+        match choice.finish_reason.as_deref() {
+            Some("stop") => {
+                events.push(Ok(LanguageModelCompletionEvent::Stop(StopReason::EndTurn)));
+            }
+            Some("tool_calls") => {
+                events.extend(self.tool_calls_by_index.drain().map(|(_, tool_call)| {
+                    match serde_json::Value::from_str(&tool_call.arguments) {
+                        Ok(input) => Ok(LanguageModelCompletionEvent::ToolUse(
                             LanguageModelToolUse {
-                                id: raw_tool_call.id.into(),
-                                name: raw_tool_call.name.into(),
+                                id: tool_call.id.clone().into(),
+                                name: tool_call.name.as_str().into(),
                                 is_input_complete: true,
-                                raw_input: raw_tool_call.arguments.clone(),
                                 input,
+                                raw_input: tool_call.arguments.clone(),
                             },
-                        ));
+                        )),
+                        Err(error) => Err(LanguageModelCompletionError::BadInputJson {
+                            id: tool_call.id.into(),
+                            tool_name: tool_call.name.as_str().into(),
+                            raw_input: tool_call.arguments.into(),
+                            json_parse_error: error.to_string(),
+                        }),
                     }
-                    return Ok(LanguageModelCompletionEvent::Stop(StopReason::ToolUse));
-                }
-                reason => {
-                    return Ok(LanguageModelCompletionEvent::Stop(StopReason::Other(
-                        reason.to_string(),
-                    )));
-                }
+                }));
+
+                events.push(Ok(LanguageModelCompletionEvent::Stop(StopReason::ToolUse)));
             }
+            Some(stop_reason) => {
+                log::error!("Unexpected OpenAI stop_reason: {stop_reason:?}",);
+                events.push(Ok(LanguageModelCompletionEvent::Stop(StopReason::EndTurn)));
+            }
+            None => {}
         }
 
-        Ok(LanguageModelCompletionEvent::Text(String::new()))
+        events
     }
 }
 
+#[derive(Default)]
 struct RawToolCall {
     id: String,
     name: String,
@@ -612,38 +626,43 @@ pub fn count_open_aux_tokens(
     _model: open_aux::Model,
     cx: &App,
 ) -> BoxFuture<'static, Result<usize>> {
-    // This is a simplified token counting implementation
-    let text = request
-        .messages
-        .iter()
-        .flat_map(|m| m.content.iter())
-        .filter_map(|content| match content {
-            MessageContent::Text(text) => Some(text.as_str()),
-            MessageContent::Thinking { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
+    cx.background_spawn(async move {
+        let messages = request
+            .messages
+            .into_iter()
+            .map(|message| tiktoken_rs::ChatCompletionRequestMessage {
+                role: match message.role {
+                    Role::User => "user".into(),
+                    Role::Assistant => "assistant".into(),
+                    Role::System => "system".into(),
+                },
+                content: Some(message.string_contents()),
+                name: None,
+                function_call: None,
+            })
+            .collect::<Vec<_>>();
 
-    let token_count = text.split_whitespace().count();
-    async move { Ok(token_count) }.boxed()
+        tiktoken_rs::num_tokens_from_messages("gpt-4o", &messages)
+    })
+    .boxed()
 }
 
 struct ConfigurationView {
     api_key_editor: Entity<Editor>,
-    state: Entity<State>,
+    state: gpui::Entity<State>,
     load_credentials_task: Option<Task<()>>,
 }
 
 impl ConfigurationView {
-    fn new(state: Entity<State>, window: &mut gpui::Window, cx: &mut Context<Self>) -> Self {
+    fn new(state: gpui::Entity<State>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let api_key_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("sk-000000000000000000000000000000000000000000000000", cx);
+            editor
+                .set_placeholder_text("sk_or_000000000000000000000000000000000000000000000000", cx);
             editor
         });
 
-        cx.observe(&state, |_, _cx, cx| {
+        cx.observe(&state, |_, _, cx| {
             cx.notify();
         })
         .detach();
@@ -673,12 +692,7 @@ impl ConfigurationView {
         }
     }
 
-    fn save_api_key(
-        &mut self,
-        _: &menu::Confirm,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn save_api_key(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
         let api_key = self.api_key_editor.read(cx).text(cx);
         if api_key.is_empty() {
             return;
@@ -695,7 +709,7 @@ impl ConfigurationView {
         cx.notify();
     }
 
-    fn reset_api_key(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+    fn reset_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.api_key_editor
             .update(cx, |editor, cx| editor.set_text("", window, cx));
 
@@ -719,9 +733,6 @@ impl ConfigurationView {
             font_weight: settings.ui_font.weight,
             font_style: FontStyle::Normal,
             line_height: relative(1.3),
-            background_color: None,
-            underline: None,
-            strikethrough: None,
             white_space: WhiteSpace::Normal,
             ..Default::default()
         };
@@ -742,7 +753,7 @@ impl ConfigurationView {
 }
 
 impl Render for ConfigurationView {
-    fn render(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let env_var_set = self.state.read(cx).api_key_from_env;
 
         if self.load_credentials_task.is_some() {

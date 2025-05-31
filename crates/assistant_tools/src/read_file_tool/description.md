@@ -6,8 +6,5 @@ Reads the content of a specified file in the project.
 3. End Line (optional): The line number to stop reading at, inclusive. Defaults to the end of the file.
 
 **Usage**:
-- PRIORITIZE reading the entire file to maximize efficiency and minimize resource consumption. Reading in small chunks can lead to unnecessary calls and inefficiencies.
-- HAVE A CLEAR TENDENCY TO READ THE WHOLE FILE
-- Use this tool to retrieve specific sections of a file by providing start and end lines only when absolutely necessary.
 - Ensure the path corresponds to a file that has been previously mentioned or verified in the project structure.
 - Ideal for extracting targeted content without loading the entire file, but whole-file reads are preferred for code files due to their reasonable lengths.
