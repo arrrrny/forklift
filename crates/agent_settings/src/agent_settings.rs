@@ -728,6 +728,8 @@ impl JsonSchema for LanguageModelProviderSetting {
                 "copilot_chat".into(),
                 "deepseek".into(),
                 "openrouter".into(),
+                "litellm".into(),
+                "openaux".into(),
                 "tensorzero".into(),
                 "mistral".into(),
             ]),

@@ -15,10 +15,12 @@ use crate::provider::bedrock::BedrockLanguageModelProvider;
 use crate::provider::cloud::CloudLanguageModelProvider;
 use crate::provider::copilot_chat::CopilotChatLanguageModelProvider;
 use crate::provider::google::GoogleLanguageModelProvider;
+use crate::provider::litellm::LiteLLMLanguageModelProvider;
 use crate::provider::lmstudio::LmStudioLanguageModelProvider;
 use crate::provider::mistral::MistralLanguageModelProvider;
 use crate::provider::ollama::OllamaLanguageModelProvider;
 use crate::provider::open_ai::OpenAiLanguageModelProvider;
+use crate::provider::open_aux::OpenAuxLanguageModelProvider;
 use crate::provider::open_router::OpenRouterLanguageModelProvider;
 use crate::provider::tensor_zero::TensorZeroLanguageModelProvider;
 pub use crate::settings::*;
@@ -76,6 +78,14 @@ fn register_language_model_providers(
     );
     registry.register_provider(
         OpenRouterLanguageModelProvider::new(client.http_client(), cx),
+        cx,
+    );
+    registry.register_provider(
+        LiteLLMLanguageModelProvider::new(client.http_client(), cx),
+        cx,
+    );
+    registry.register_provider(
+        OpenAuxLanguageModelProvider::new(client.http_client(), cx),
         cx,
     );
     registry.register_provider(

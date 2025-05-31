@@ -16,10 +16,12 @@ use crate::provider::{
     copilot_chat::CopilotChatSettings,
     deepseek::DeepSeekSettings,
     google::GoogleSettings,
+    litellm::LiteLLMSettings,
     lmstudio::LmStudioSettings,
     mistral::MistralSettings,
     ollama::OllamaSettings,
     open_ai::OpenAiSettings,
+    open_aux::OpenAuxSettings,
     open_router::OpenRouterSettings,
     tensor_zero::TensorZeroSettings,
 };
@@ -64,13 +66,15 @@ pub struct AllLanguageModelSettings {
     pub ollama: OllamaSettings,
     pub openai: OpenAiSettings,
     pub open_router: OpenRouterSettings,
+    pub litellm: LiteLLMSettings,
+    pub open_aux: OpenAuxSettings,
     pub tensor_zero: TensorZeroSettings,
     pub zed_dot_dev: ZedDotDevSettings,
     pub google: GoogleSettings,
     pub copilot_chat: CopilotChatSettings,
     pub lmstudio: LmStudioSettings,
-    pub deepseek: DeepSeekSettings,
     pub mistral: MistralSettings,
+    pub deepseek: DeepSeekSettings,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -81,13 +85,15 @@ pub struct AllLanguageModelSettingsContent {
     pub lmstudio: Option<LmStudioSettingsContent>,
     pub openai: Option<OpenAiSettingsContent>,
     pub open_router: Option<OpenRouterSettingsContent>,
+    pub litellm: Option<LiteLLMSettingsContent>,
+    pub open_aux: Option<OpenAuxSettingsContent>,
     pub tensor_zero: Option<TensorZeroSettingsContent>,
     #[serde(rename = "zed.dev")]
     pub zed_dot_dev: Option<ZedDotDevSettingsContent>,
     pub google: Option<GoogleSettingsContent>,
-    pub deepseek: Option<DeepseekSettingsContent>,
     pub copilot_chat: Option<CopilotChatSettingsContent>,
     pub mistral: Option<MistralSettingsContent>,
+    pub deepseek: Option<DeepSeekSettingsContent>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -283,6 +289,18 @@ pub struct OpenRouterSettingsContent {
     pub available_models: Option<Vec<provider::open_router::AvailableModel>>,
 }
 
+#[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct LiteLLMSettingsContent {
+    pub api_url: Option<String>,
+    pub available_models: Option<Vec<provider::litellm::AvailableModel>>,
+}
+
+#[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct OpenAuxSettingsContent {
+    pub api_url: Option<String>,
+    pub available_models: Option<Vec<provider::open_aux::AvailableModel>>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct TensorZeroSettingsContent {
     pub api_url: Option<String>,
@@ -439,6 +457,28 @@ impl settings::Settings for AllLanguageModelSettings {
                 open_router
                     .as_ref()
                     .and_then(|s| s.available_models.clone()),
+            );
+
+            // LiteLLM
+            let litellm = value.litellm.clone();
+            merge(
+                &mut settings.litellm.api_url,
+                litellm.as_ref().and_then(|s| s.api_url.clone()),
+            );
+            merge(
+                &mut settings.litellm.available_models,
+                litellm.as_ref().and_then(|s| s.available_models.clone()),
+            );
+
+            // OpenAux
+            let open_aux = value.open_aux.clone();
+            merge(
+                &mut settings.open_aux.api_url,
+                open_aux.as_ref().and_then(|s| s.api_url.clone()),
+            );
+            merge(
+                &mut settings.open_aux.available_models,
+                open_aux.as_ref().and_then(|s| s.available_models.clone()),
             );
 
             // TensorZero

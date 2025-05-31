@@ -101,6 +101,8 @@ members = [
     "crates/ollama",
     "crates/open_ai",
     "crates/open_router",
+    "crates/litellm",
+    "crates/open_aux",
     "crates/tensor_zero",
     "crates/outline",
     "crates/outline_panel",
@@ -310,6 +312,8 @@ notifications = { path = "crates/notifications" }
 ollama = { path = "crates/ollama" }
 open_ai = { path = "crates/open_ai" }
 open_router = { path = "crates/open_router", features = ["schemars"] }
+litellm = { path = "crates/litellm", features = ["schemars"] }
+open_aux = { path = "crates/open_aux", features = ["schemars"] }
 tensor_zero = { path = "crates/tensor_zero", features = ["schemars"] }
 outline = { path = "crates/outline" }
 outline_panel = { path = "crates/outline_panel" }
